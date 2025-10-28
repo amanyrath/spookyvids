@@ -10,9 +10,11 @@ interface TimelineProps {
 }
 
 function Timeline({ currentFile, duration, inTime, outTime, playheadTime, onTimeUpdate }: TimelineProps) {
-  const [isDragging, setIsDragging] = useState<'in' | 'out' | 'playhead' | null>(null);
-  const [dragStartState, setDragStartState] = useState<{ inTime: number; outTime: number; playheadTime: number } | null>(null);
+  const [isDragging, setIsDragging] = useState<'in' | 'out' | 'playhead' | 'clip' | null>(null);
+  const [dragStartState, setDragStartState] = useState<{ inTime: number; outTime: number; playheadTime: number; clickOffset: number } | null>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const rulerRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
 
   // Pixel to time conversion
@@ -27,12 +29,34 @@ function Timeline({ currentFile, duration, inTime, outTime, playheadTime, onTime
     return (time / duration) * timelineWidth * scale;
   };
 
+  // Sync scroll between ruler and timeline
+  const handleRulerScroll = useCallback(() => {
+    if (scrollContainerRef.current && rulerRef.current) {
+      scrollContainerRef.current.scrollLeft = rulerRef.current.scrollLeft;
+    }
+  }, []);
+
+  const handleTimelineScroll = useCallback(() => {
+    if (scrollContainerRef.current && rulerRef.current) {
+      rulerRef.current.scrollLeft = scrollContainerRef.current.scrollLeft;
+    }
+  }, []);
+
+  useEffect(() => {
+    const timeline = scrollContainerRef.current;
+    if (timeline) {
+      timeline.addEventListener('scroll', handleTimelineScroll);
+      return () => timeline.removeEventListener('scroll', handleTimelineScroll);
+    }
+  }, [handleTimelineScroll]);
+
   // Handle mouse move for dragging
   const handleMouseMove = useCallback((e: MouseEvent) => {
     if (!isDragging || !timelineRef.current) return;
 
     const rect = timelineRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
+    const scrollOffset = scrollContainerRef.current?.scrollLeft || 0;
+    const x = e.clientX - rect.left + scrollOffset;
     const time = pixelToTime(x);
 
     if (isDragging === 'in') {
@@ -44,14 +68,26 @@ function Timeline({ currentFile, duration, inTime, outTime, playheadTime, onTime
     } else if (isDragging === 'playhead') {
       const clampedTime = Math.max(inTime, Math.min(time, outTime));
       onTimeUpdate(inTime, outTime, clampedTime, true); // skipHistory during drag
+    } else if (isDragging === 'clip' && dragStartState) {
+      // Calculate the offset from the original position
+      const clipDuration = dragStartState.outTime - dragStartState.inTime;
+      
+      // Calculate what time the mouse is pointing at
+      const mouseTime = pixelToTime(x);
+      
+      // Calculate the new start position, accounting for the original click position within the clip
+      const newInTime = Math.max(0, Math.min(mouseTime - dragStartState.clickOffset, duration - clipDuration));
+      const newOutTime = newInTime + clipDuration;
+      
+      // Keep the playhead at its original position when moving the clip
+      const newPlayheadTime = dragStartState.playheadTime;
+      
+      onTimeUpdate(newInTime, newOutTime, newPlayheadTime, true); // skipHistory during drag
     }
-  }, [isDragging, inTime, outTime, playheadTime, duration, onTimeUpdate]);
+  }, [isDragging, inTime, outTime, playheadTime, duration, onTimeUpdate, dragStartState]);
 
   useEffect(() => {
     if (isDragging) {
-      // Save the state at the start of drag for history
-      const startState = { inTime, outTime, playheadTime };
-      
       window.addEventListener('mousemove', handleMouseMove);
       const handleMouseUp = () => {
         setIsDragging(null);
@@ -83,6 +119,10 @@ function Timeline({ currentFile, duration, inTime, outTime, playheadTime, onTime
   const clipStart = timeToPixel(inTime);
   const clipWidth = timeToPixel(outTime - inTime);
   const playheadX = timeToPixel(playheadTime);
+  
+  // Calculate the minimum width for the scrollable container
+  const timelineWidth = timelineRef.current?.clientWidth || 1;
+  const minWidth = Math.max(timelineWidth, timeToPixel(duration));
 
   return (
     <div className="h-full flex flex-col">
@@ -120,59 +160,124 @@ function Timeline({ currentFile, duration, inTime, outTime, playheadTime, onTime
       </div>
 
       {/* Time Ruler */}
-      <div className="h-10 bg-[#252525] border-b border-[#3a3a3a] px-6 flex items-center">
-        <div className="flex gap-8 text-xs text-gray-400 font-mono">
-          <span>0s</span>
-          <span>{duration > 5 ? '5s' : ''}</span>
-          <span>{duration > 10 ? '10s' : ''}</span>
-          <span>{duration > 15 ? '15s' : ''}</span>
-          <span>{duration > 20 ? '20s' : ''}</span>
-          <span>{duration > 25 ? '25s' : ''}</span>
-          <span>{Math.ceil(duration)}s</span>
-        </div>
+      <div 
+        ref={rulerRef}
+        className="h-10 bg-[#252525] border-b border-[#3a3a3a] relative overflow-x-auto overflow-y-hidden"
+        style={{ minWidth: `${minWidth}px` }}
+        onScroll={handleRulerScroll}
+      >
+        {(() => {
+          // Calculate optimal time intervals based on zoom level
+          const pixelsPerSecond = (timelineWidth / duration) * scale;
+          let interval: number;
+          
+          if (pixelsPerSecond < 20) interval = 5; // Show every 5 seconds
+          else if (pixelsPerSecond < 50) interval = 2; // Show every 2 seconds
+          else if (pixelsPerSecond < 100) interval = 1; // Show every 1 second
+          else if (pixelsPerSecond < 200) interval = 0.5; // Show every 0.5 seconds
+          else interval = 0.25; // Show every 0.25 seconds
+          
+          const marks: Array<{ time: number; x: number; isMajor: boolean }> = [];
+          for (let t = 0; t <= duration; t += interval) {
+            const x = timeToPixel(t);
+            marks.push({ time: t, x, isMajor: Math.floor(t) === t });
+          }
+          
+          return (
+            <>
+              {/* Grid lines */}
+              {marks.map((mark, i) => (
+                <div
+                  key={i}
+                  className="absolute top-0 bottom-0 border-l border-[#333333]"
+                  style={{ left: `${mark.x}px` }}
+                />
+              ))}
+              
+              {/* Time labels */}
+              {marks.filter(m => m.isMajor || duration < 5).map((mark, i) => (
+                <div
+                  key={i}
+                  className="absolute top-0 left-0 right-0 h-full flex items-center"
+                  style={{ left: `${mark.x}px`, transform: 'translateX(-50%)' }}
+                >
+                  <span className="text-xs text-gray-400 font-mono px-1">
+                    {mark.time % 1 === 0 ? `${mark.time.toFixed(0)}s` : `${mark.time.toFixed(2)}s`}
+                  </span>
+                </div>
+              ))}
+            </>
+          );
+        })()}
       </div>
 
       {/* Timeline Tracks */}
       <div className="flex-1 p-4" ref={timelineRef}>
-        <div className="w-full h-full bg-[#1a1a1a] rounded border border-[#2a2a2a] relative overflow-hidden">
+        <div 
+          ref={scrollContainerRef} 
+          className="w-full h-full bg-[#1a1a1a] rounded border border-[#2a2a2a] relative overflow-x-auto overflow-y-hidden"
+          style={{ minWidth: `${minWidth}px` }}
+        >
           {/* Clip Bar */}
           <div
-            className="absolute h-8 bg-blue-600 rounded"
+            className="h-8 bg-blue-600 rounded cursor-move"
             style={{
+              position: 'absolute',
               left: `${clipStart}px`,
               width: `${clipWidth}px`,
               top: '50%',
               transform: 'translateY(-50%)'
+            }}
+            onMouseDown={(e) => {
+              // Only start dragging if we didn't click on the handles or playhead
+              const target = e.target as HTMLElement;
+              const isHandle = target.closest('.cursor-ew-resize');
+              const isPlayhead = target.closest('.cursor-col-resize');
+              
+              if (!isHandle && !isPlayhead) {
+                e.stopPropagation();
+                const rect = timelineRef.current?.getBoundingClientRect();
+                if (rect) {
+                  const scrollOffset = scrollContainerRef.current?.scrollLeft || 0;
+                  const x = e.clientX - rect.left + scrollOffset;
+                  const mouseTime = pixelToTime(x);
+                  const clickOffset = mouseTime - inTime;
+                  setDragStartState({ inTime, outTime, playheadTime, clickOffset });
+                  setIsDragging('clip');
+                }
+              }
             }}
           >
           {/* Start Handle */}
           <div
             onMouseDown={(e) => {
               e.stopPropagation();
-              setDragStartState({ inTime, outTime, playheadTime });
+              setDragStartState({ inTime, outTime, playheadTime, clickOffset: 0 });
               setIsDragging('in');
             }}
-            className="absolute left-0 top-0 bottom-0 w-2 bg-blue-400 hover:bg-blue-300 cursor-ew-resize rounded-l"
+            className="absolute left-0 top-0 bottom-0 w-3 bg-blue-400 hover:bg-blue-300 cursor-ew-resize rounded-l z-10"
+            style={{ minWidth: '8px' }}
           />
 
           {/* End Handle */}
           <div
             onMouseDown={(e) => {
               e.stopPropagation();
-              setDragStartState({ inTime, outTime, playheadTime });
+              setDragStartState({ inTime, outTime, playheadTime, clickOffset: 0 });
               setIsDragging('out');
             }}
-            className="absolute right-0 top-0 bottom-0 w-2 bg-blue-400 hover:bg-blue-300 cursor-ew-resize rounded-r"
+            className="absolute right-0 top-0 bottom-0 w-3 bg-blue-400 hover:bg-blue-300 cursor-ew-resize rounded-r z-10"
+            style={{ minWidth: '8px' }}
           />
           </div>
 
           {/* Playhead */}
           <div
             onMouseDown={() => {
-              setDragStartState({ inTime, outTime, playheadTime });
+              setDragStartState({ inTime, outTime, playheadTime, clickOffset: 0 });
               setIsDragging('playhead');
             }}
-            className="absolute w-0.5 h-full bg-red-500 cursor-col-resize"
+            className="absolute w-0.5 h-full bg-red-500 cursor-col-resize z-20"
             style={{ left: `${playheadX}px` }}
           >
             <div className="absolute top-0 left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-4 border-r-4 border-b-4 border-transparent border-b-red-500" />
