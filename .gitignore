@@ -21,6 +21,9 @@ Thumbs.db
 *.swp
 *.swo
 
+# Cursor AI
+.cursor/
+
 # TypeScript
 *.tsbuildinfo
 

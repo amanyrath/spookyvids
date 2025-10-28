@@ -1,0 +1,63 @@
+// main.js - Electron Main Process
+const { app, BrowserWindow, ipcMain } = require('electron');
+const path = require('path');
+// Import modules needed for PR 2, 3, 5, 6
+const ffmpeg = require('fluent-ffmpeg');
+const ffprobeStatic = require('ffprobe-static');
+
+// IMPORTANT: Set the path to the bundled ffprobe executable
+ffmpeg.setFfprobePath(ffprobeStatic.path); 
+
+let mainWindow;
+
+function createWindow() {
+    mainWindow = new BrowserWindow({
+        width: 1024,
+        height: 768,
+        minWidth: 800,
+        minHeight: 600,
+        webPreferences: {
+            preload: path.join(__dirname, 'preload.js'),
+            // Enable Node.js environment in the renderer for basic setup 
+            // (Note: Best practice is to restrict via preload for security, 
+            // but for MVP speed, we use contextIsolation: false temporarily)
+            contextIsolation: false, 
+            nodeIntegration: true
+        }
+    });
+
+    // Load the HTML file
+    mainWindow.loadFile('index.html');
+
+    // Optional: Open DevTools
+    // mainWindow.webContents.openDevTools();
+}
+
+app.whenReady().then(createWindow);
+
+app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') {
+        app.quit();
+    }
+});
+
+app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+        createWindow();
+    }
+});
+
+// --- PR 1: IPC Channels (Initialization) ---
+// Define placeholder channels to avoid crashes later
+ipcMain.on('file-dropped', (event, filePath) => {
+    console.log(`[Main] File dropped: ${filePath}`);
+    // PR 2 logic goes here: validation and metadata request
+});
+
+ipcMain.on('export-request', (event, data) => {
+    console.log('[Main] Export request received.');
+    // PR 5 logic goes here: show save dialog and run ffmpeg
+});
+// ------------------------------------------
+
+console.log('[Main] Electron app launched successfully.');
