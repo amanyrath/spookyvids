@@ -1,10 +1,5 @@
 import React, { useState, useEffect } from 'react';
 
-// Electron File type with path property
-interface ElectronFile extends File {
-  path: string;
-}
-
 interface ImportAreaProps {
   onFileLoaded?: (filePath: string, fileName: string, metadata?: any) => void;
   onImportClick?: () => void;
@@ -100,8 +95,13 @@ function ImportArea({ onFileLoaded, onImportClick, onClipSelect, selectedClipPat
 
     // Set up listeners if electronAPI is available
     if (window.electronAPI) {
-      window.electronAPI.onFileValidated(handleFileValidated);
-      window.electronAPI.onFileError(handleFileError);
+      const cleanupValidated = window.electronAPI.onFileValidated(handleFileValidated);
+      const cleanupError = window.electronAPI.onFileError(handleFileError);
+      
+      return () => {
+        if (cleanupValidated) cleanupValidated();
+        if (cleanupError) cleanupError();
+      };
     } else {
       console.warn('electronAPI not available, IPC will not work');
     }
@@ -130,16 +130,25 @@ function ImportArea({ onFileLoaded, onImportClick, onClipSelect, selectedClipPat
     if (files.length > 0) {
       // Process each dropped file
       for (const file of files) {
-        const electronFile = file as any;
+        console.log('Processing file:', file.name);
         
-        // Try to get file path
-        let filePath: string | undefined = electronFile.path;
+        // Get file path using Electron's webUtils API
+        let filePath: string | undefined;
         
-        console.log('Processing file:', file.name, 'Path:', filePath);
+        if (window.electronAPI?.getFilePath) {
+          try {
+            filePath = window.electronAPI.getFilePath(file);
+            console.log('File path from webUtils:', filePath);
+          } catch (error) {
+            console.error('Error getting file path from webUtils:', error);
+          }
+        }
         
         if (!filePath) {
-          console.warn(`Could not get path for file: ${file.name}`);
-          continue; // Skip this file
+          console.warn(`Could not get path for file: ${file.name}. Trying fallback...`);
+          // Fallback: Use the file name (won't work, but won't crash)
+          alert('Unable to access file path. Please use the import button to select files.');
+          continue;
         }
         
         // Validate and process this file

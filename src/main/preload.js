@@ -16,11 +16,34 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Listen for validation response
   onFileValidated: (callback) => {
     ipcRenderer.on('file-validated', (event, data) => callback(event, data));
+    return () => ipcRenderer.removeAllListeners('file-validated');
   },
   
   // Listen for validation errors
   onFileError: (callback) => {
     ipcRenderer.on('file-error', (event, error) => callback(event, error));
+    return () => ipcRenderer.removeAllListeners('file-error');
+  },
+  
+  // Export video with trim settings
+  exportVideo: (data) => ipcRenderer.invoke('export-request', data),
+  
+  // Listen for export progress
+  onExportProgress: (callback) => {
+    ipcRenderer.on('export-progress', (event, data) => callback(event, data));
+    return () => ipcRenderer.removeAllListeners('export-progress');
+  },
+  
+  // Listen for export completion
+  onExportComplete: (callback) => {
+    ipcRenderer.on('export-complete', (event, data) => callback(event, data));
+    return () => ipcRenderer.removeAllListeners('export-complete');
+  },
+  
+  // Listen for export errors
+  onExportError: (callback) => {
+    ipcRenderer.on('export-error', (event, data) => callback(event, data));
+    return () => ipcRenderer.removeAllListeners('export-error');
   }
 });
 

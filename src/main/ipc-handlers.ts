@@ -154,6 +154,105 @@ export function setupIpcHandlers() {
     }
   });
   
+  // Handle export request from renderer
+  ipcMain.handle('export-request', async (event, { inTime, outTime, outputPath }) => {
+    if (!currentFilePath) {
+      return { success: false, error: 'No video loaded' };
+    }
+
+    try {
+      console.log('Export request:', { inTime, outTime, outputPath });
+
+      // If no output path provided, show save dialog
+      let finalOutputPath = outputPath;
+      if (!finalOutputPath) {
+        const result = await dialog.showSaveDialog(mainWindow, {
+          defaultPath: 'exported-video.mp4',
+          filters: [
+            { name: 'Videos', extensions: ['mp4'] }
+          ]
+        });
+
+        if (result.canceled || !result.filePath) {
+          return { success: false, canceled: true };
+        }
+
+        finalOutputPath = result.filePath;
+      }
+
+      // Ensure .mp4 extension
+      if (!finalOutputPath.endsWith('.mp4')) {
+        finalOutputPath += '.mp4';
+      }
+
+      console.log('Starting export to:', finalOutputPath);
+      console.log('Trim settings:', { inTime, outTime, duration: outTime - inTime });
+
+      // Execute ffmpeg export
+      await new Promise<void>((resolve, reject) => {
+        if (!currentFilePath) {
+          reject(new Error('No video file loaded'));
+          return;
+        }
+
+        const command = ffmpeg(currentFilePath)
+          .seek(inTime)
+          .duration(outTime - inTime)
+          .videoCodec('libx264')
+          .outputOptions('-crf 23')
+          .outputOptions('-preset medium')
+          .audioCodec('aac')
+          .audioBitrate('192k')
+          .output(finalOutputPath)
+          .on('start', (commandLine) => {
+            console.log('FFmpeg command:', commandLine);
+          })
+          .on('progress', (progress) => {
+            const percent = progress.percent || 0;
+            console.log('Export progress:', percent + '%');
+            // Send progress to renderer
+            if (mainWindow) {
+              mainWindow.webContents.send('export-progress', { percent });
+            }
+          })
+          .on('end', () => {
+            console.log('Export completed successfully');
+            // Send success to renderer
+            if (mainWindow) {
+              mainWindow.webContents.send('export-complete', { 
+                outputPath: finalOutputPath 
+              });
+            }
+            resolve();
+          })
+          .on('error', (err) => {
+            console.error('Export error:', err);
+            // Send error to renderer
+            if (mainWindow) {
+              mainWindow.webContents.send('export-error', { 
+                message: err.message 
+              });
+            }
+            reject(err);
+          });
+
+        command.run();
+      });
+
+      return { 
+        success: true, 
+        outputPath: finalOutputPath,
+        duration: outTime - inTime
+      };
+    } catch (error: any) {
+      console.error('Export failed:', error);
+      return { 
+        success: false, 
+        error: error.message || 'Export failed' 
+      };
+    }
+  });
+  
   console.log('IPC handlers initialized');
 }
 
