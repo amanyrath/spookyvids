@@ -177,7 +177,7 @@ function ImportArea({ onFileLoaded, onImportClick, onClipSelect, selectedClipPat
                   onClick={() => handleClipClick(clip)}
                   className={`border rounded-lg bg-[#1a1a1a] overflow-hidden transition-colors cursor-pointer ${
                     selectedClipPath === clip.filePath 
-                      ? 'border-blue-500 bg-[#1a2a3a]' 
+                      ? 'border-purple-700 bg-[#2a1a3a]' 
                       : 'border-[#3a3a3a] hover:border-[#4a4a4a]'
                   }`}
                 >
@@ -215,7 +215,7 @@ function ImportArea({ onFileLoaded, onImportClick, onClipSelect, selectedClipPat
             onDrop={handleDrop}
             className={`border-2 border-dashed rounded-lg flex items-center justify-center bg-[#1a1a1a] transition-all cursor-pointer ${
               isDragging 
-                ? 'border-blue-500 bg-[#1a2a3a]' 
+                ? 'border-purple-700 bg-[#2a1a3a]' 
                 : 'border-[#3a3a3a] hover:border-[#4a4a4a]'
             }`}
           >

@@ -123,7 +123,7 @@ function PreviewPlayer({ filePath, metadata, playheadTime = 0, isPlaying, setIsP
             onClick={() => {
               setIsPlaying?.(!isPlaying);
             }}
-            className="p-2 bg-blue-600 hover:bg-blue-700 rounded transition-colors"
+            className="p-2 bg-purple-900 hover:bg-purple-800 rounded transition-colors"
             title={isPlaying ? "Pause" : "Play"}
           >
             {isPlaying ? (

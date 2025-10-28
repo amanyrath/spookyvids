@@ -220,7 +220,7 @@ function Timeline({ currentFile, duration, inTime, outTime, playheadTime, onTime
         >
           {/* Clip Bar */}
           <div
-            className="h-8 bg-blue-600 rounded cursor-move"
+            className="h-8 bg-purple-900 rounded cursor-move"
             style={{
               position: 'absolute',
               left: `${clipStart}px`,
@@ -255,7 +255,7 @@ function Timeline({ currentFile, duration, inTime, outTime, playheadTime, onTime
               setDragStartState({ inTime, outTime, playheadTime, clickOffset: 0 });
               setIsDragging('in');
             }}
-            className="absolute left-0 top-0 bottom-0 w-3 bg-blue-400 hover:bg-blue-300 cursor-ew-resize rounded-l z-10"
+            className="absolute left-0 top-0 bottom-0 w-3 bg-purple-700 hover:bg-purple-600 cursor-ew-resize rounded-l z-10"
             style={{ minWidth: '8px' }}
           />
 
@@ -266,7 +266,7 @@ function Timeline({ currentFile, duration, inTime, outTime, playheadTime, onTime
               setDragStartState({ inTime, outTime, playheadTime, clickOffset: 0 });
               setIsDragging('out');
             }}
-            className="absolute right-0 top-0 bottom-0 w-3 bg-blue-400 hover:bg-blue-300 cursor-ew-resize rounded-r z-10"
+            className="absolute right-0 top-0 bottom-0 w-3 bg-purple-700 hover:bg-purple-600 cursor-ew-resize rounded-r z-10"
             style={{ minWidth: '8px' }}
           />
           </div>

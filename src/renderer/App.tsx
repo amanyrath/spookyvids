@@ -257,7 +257,7 @@ function App() {
     <div className="h-screen flex flex-col bg-[#1a1a1a] text-white overflow-hidden">
       {/* Top Toolbar */}
       <div className="h-12 bg-[#252525] border-b border-[#3a3a3a] flex items-center justify-between px-6">
-        <h1 className="text-lg font-semibold">ClipForge MVP</h1>
+        <h1 className="text-lg font-semibold">Spooky Clips</h1>
         <div className="flex items-center gap-3">
           {exportSuccess && (
             <div className="flex items-center gap-2 px-3 py-1 bg-green-600/20 border border-green-600/40 rounded text-sm text-green-400">
@@ -285,7 +285,7 @@ function App() {
           <button 
             onClick={handleExportVideo}
             disabled={isExporting || !currentFile}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed relative min-w-[100px]"
+            className="px-4 py-2 bg-purple-900 hover:bg-purple-800 rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed relative min-w-[100px]"
           >
             {isExporting ? (
               <span className="flex items-center gap-2 justify-center">
