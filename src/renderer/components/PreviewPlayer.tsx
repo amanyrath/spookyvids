@@ -3,16 +3,81 @@ import React, { useRef, useEffect } from 'react';
 interface PreviewPlayerProps {
   filePath: string | null;
   metadata?: any;
+  playheadTime?: number;
+  isPlaying?: boolean;
+  setIsPlaying?: (playing: boolean) => void;
+  onTimeUpdate?: (currentTime: number) => void;
 }
 
-function PreviewPlayer({ filePath, metadata }: PreviewPlayerProps) {
+function PreviewPlayer({ filePath, metadata, playheadTime = 0, isPlaying, setIsPlaying, onTimeUpdate }: PreviewPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  
+  const formatTime = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
 
   useEffect(() => {
     if (videoRef.current && filePath) {
       videoRef.current.load();
     }
   }, [filePath]);
+
+  // Sync video player with playhead
+  useEffect(() => {
+    if (videoRef.current && filePath && playheadTime !== undefined) {
+      // Only sync if significantly different to avoid rapid updates
+      const currentTime = videoRef.current.currentTime;
+      if (Math.abs(currentTime - playheadTime) > 0.1) {
+        videoRef.current.currentTime = playheadTime;
+      }
+    }
+  }, [playheadTime, filePath]);
+
+  // Handle play/pause
+  useEffect(() => {
+    if (videoRef.current) {
+      if (isPlaying) {
+        // Ensure video is at the correct playhead position before playing
+        if (Math.abs(videoRef.current.currentTime - playheadTime) > 0.1) {
+          videoRef.current.currentTime = playheadTime;
+        }
+        videoRef.current.play().catch(err => console.log('Play error:', err));
+      } else {
+        videoRef.current.pause();
+      }
+    }
+  }, [isPlaying, playheadTime]);
+
+  // Update playhead from video time and handle bounds
+  useEffect(() => {
+    if (videoRef.current && isPlaying && onTimeUpdate) {
+      const handleTimeUpdate = () => {
+        if (videoRef.current && videoRef.current.readyState >= 2) {
+          const currentTime = videoRef.current.currentTime;
+          
+          // Check if we've exceeded the trim end point
+          if (metadata?.duration && currentTime >= metadata.duration) {
+            if (videoRef.current) {
+              videoRef.current.pause();
+              // Return to end of trim
+              if (onTimeUpdate) {
+                onTimeUpdate(metadata.duration);
+              }
+            }
+          } else if (onTimeUpdate) {
+            onTimeUpdate(currentTime);
+          }
+        }
+      };
+      
+      videoRef.current.addEventListener('timeupdate', handleTimeUpdate);
+      return () => {
+        videoRef.current?.removeEventListener('timeupdate', handleTimeUpdate);
+      };
+    }
+  }, [isPlaying, onTimeUpdate, metadata]);
 
   return (
     <div className="h-full flex flex-col">
@@ -41,17 +106,45 @@ function PreviewPlayer({ filePath, metadata }: PreviewPlayerProps) {
       {/* Playback Controls Bar */}
       <div className="h-16 bg-[#1a1a1a] border-t border-[#3a3a3a] flex items-center justify-between px-8">
         <div className="flex items-center gap-2">
-          <button className="p-2 hover:bg-[#2a2a2a] rounded transition-colors">
+          <button 
+            onClick={() => {
+              if (videoRef.current) {
+                videoRef.current.currentTime = Math.max(0, videoRef.current.currentTime - 5);
+              }
+            }}
+            className="p-2 hover:bg-[#2a2a2a] rounded transition-colors"
+            title="Rewind 5s"
+          >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0019 16V8a1 1 0 00-1.6-.8l-5.334 4zM4.066 11.2a1 1 0 000 1.6l5.334 4A1 1 0 0011 16V8a1 1 0 00-1.6-.8l-5.334 4z" />
             </svg>
           </button>
-          <button className="p-2 bg-blue-600 hover:bg-blue-700 rounded transition-colors">
-            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M8 5v14l11-7z"/>
-            </svg>
+          <button 
+            onClick={() => {
+              setIsPlaying?.(!isPlaying);
+            }}
+            className="p-2 bg-blue-600 hover:bg-blue-700 rounded transition-colors"
+            title={isPlaying ? "Pause" : "Play"}
+          >
+            {isPlaying ? (
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 00-1 1v2a1 1 0 001 1h6a1 1 0 001-1V9a1 1 0 00-1-1H7z" clipRule="evenodd" />
+              </svg>
+            ) : (
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M8 5v14l11-7z"/>
+              </svg>
+            )}
           </button>
-          <button className="p-2 hover:bg-[#2a2a2a] rounded transition-colors">
+          <button 
+            onClick={() => {
+              if (videoRef.current) {
+                videoRef.current.currentTime = Math.min(videoRef.current.duration, videoRef.current.currentTime + 5);
+              }
+            }}
+            className="p-2 hover:bg-[#2a2a2a] rounded transition-colors"
+            title="Forward 5s"
+          >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
             </svg>
@@ -64,7 +157,7 @@ function PreviewPlayer({ filePath, metadata }: PreviewPlayerProps) {
         </div>
 
         <div className="text-xs text-gray-400 font-mono">
-          00:00 / 05:23
+          {formatTime(videoRef.current?.currentTime || 0)} / {formatTime(metadata?.duration || 0)}
         </div>
       </div>
     </div>

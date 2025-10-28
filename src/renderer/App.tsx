@@ -34,6 +34,7 @@ function App() {
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [exportProgress, setExportProgress] = useState<number>(0);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [exportSuccess, setExportSuccess] = useState<string | null>(null);
 
   const handleFileLoaded = (filePath: string, fileName: string, metadata?: any) => {
     console.log('File loaded in App:', filePath, fileName, metadata);
@@ -224,8 +225,12 @@ function App() {
       console.log('Export complete:', data);
       setIsExporting(false);
       setExportProgress(100);
-      alert(`Export completed successfully!\nSaved to: ${data.outputPath}`);
-      setExportProgress(0);
+      setExportSuccess(data.outputPath);
+      // Clear success message after 5 seconds
+      setTimeout(() => setExportSuccess(null), 5000);
+      setTimeout(() => {
+        setExportProgress(0);
+      }, 2000);
     };
 
     const handleExportError = (event: any, data: any) => {
@@ -233,6 +238,8 @@ function App() {
       setIsExporting(false);
       setExportError(data.message || 'Export failed');
       setExportProgress(0);
+      // Clear error after 5 seconds
+      setTimeout(() => setExportError(null), 5000);
     };
 
     const cleanupProgress = window.electronAPI.onExportProgress(handleExportProgress);
@@ -252,6 +259,22 @@ function App() {
       <div className="h-12 bg-[#252525] border-b border-[#3a3a3a] flex items-center justify-between px-6">
         <h1 className="text-lg font-semibold">ClipForge MVP</h1>
         <div className="flex items-center gap-3">
+          {exportSuccess && (
+            <div className="flex items-center gap-2 px-3 py-1 bg-green-600/20 border border-green-600/40 rounded text-sm text-green-400">
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+              </svg>
+              Export Complete
+            </div>
+          )}
+          {exportError && (
+            <div className="flex items-center gap-2 px-3 py-1 bg-red-600/20 border border-red-600/40 rounded text-sm text-red-400">
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+              </svg>
+              {exportError}
+            </div>
+          )}
           <button 
             onClick={handleImportVideo}
             disabled={isExporting}
@@ -262,12 +285,12 @@ function App() {
           <button 
             onClick={handleExportVideo}
             disabled={isExporting || !currentFile}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed relative"
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed relative min-w-[100px]"
           >
             {isExporting ? (
-              <span className="flex items-center gap-2">
+              <span className="flex items-center gap-2 justify-center">
                 <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                Exporting {Math.round(exportProgress)}%
+                <span>{Math.round(exportProgress)}%</span>
               </span>
             ) : (
               'Export'
@@ -295,6 +318,7 @@ function App() {
             metadata={fileMetadata} 
             playheadTime={playheadTime}
             isPlaying={isPlaying}
+            setIsPlaying={setIsPlaying}
             onTimeUpdate={(time) => setPlayheadTime(time)}
           />
         </div>
