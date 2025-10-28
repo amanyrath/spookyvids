@@ -1,18 +1,40 @@
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 
-function PreviewPlayer() {
+interface PreviewPlayerProps {
+  filePath: string | null;
+  metadata?: any;
+}
+
+function PreviewPlayer({ filePath, metadata }: PreviewPlayerProps) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    if (videoRef.current && filePath) {
+      videoRef.current.load();
+    }
+  }, [filePath]);
+
   return (
     <div className="h-full flex flex-col">
       {/* Video Preview Area (16:9 aspect ratio) */}
       <div className="flex-1 flex items-center justify-center bg-black p-8">
         {/* Maintain 16:9 aspect ratio container */}
-        <div className="w-full max-w-5xl aspect-video bg-[#0a0a0a] border border-[#2a2a2a] rounded flex items-center justify-center">
-          <div className="text-center">
-            <svg className="w-24 h-24 mx-auto mb-4 text-[#2a2a2a]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-            </svg>
-            <p className="text-gray-500 text-sm">No video loaded</p>
-          </div>
+        <div className="w-full max-w-5xl aspect-video bg-[#0a0a0a] border border-[#2a2a2a] rounded overflow-hidden flex items-center justify-center relative">
+          {filePath ? (
+            <video
+              ref={videoRef}
+              src={filePath}
+              className="w-full h-full object-contain"
+              controls
+            />
+          ) : (
+            <div className="text-center">
+              <svg className="w-24 h-24 mx-auto mb-4 text-[#2a2a2a]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+              <p className="text-gray-500 text-sm">No video loaded</p>
+            </div>
+          )}
         </div>
       </div>
 
