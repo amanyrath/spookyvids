@@ -1,23 +1,10 @@
 import React, { useState, useEffect } from 'react';
 
-interface Clip {
-  id: string;
-  parentId?: string;
-  filePath: string;
-  fileName: string;
-  metadata: any;
-  inTime: number;
-  outTime: number;
-  isSplit: boolean;
-}
-
 interface ImportAreaProps {
   onFileLoaded?: (filePath: string, fileName: string, metadata?: any) => void;
   onImportClick?: () => void;
-  onClipSelect?: (filePath: string, metadata?: any, clipId?: string) => void;
+  onClipSelect?: (filePath: string, metadata?: any) => void;
   selectedClipPath?: string | null;
-  clips?: Map<string, Clip>;
-  activeClipId?: string | null;
 }
 
 interface ClipInfo {
@@ -27,26 +14,9 @@ interface ClipInfo {
   duration?: number;
 }
 
-function ImportArea({ onFileLoaded, onImportClick, onClipSelect, selectedClipPath, clips, activeClipId }: ImportAreaProps) {
+function ImportArea({ onFileLoaded, onImportClick, onClipSelect, selectedClipPath }: ImportAreaProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [loadedClips, setLoadedClips] = useState<ClipInfo[]>([]);
-  
-  // Get top-level clips (non-split clips or original clips)
-  const getTopLevelClips = (): { topLevelClips: Array<{ id: string; clip: Clip }>; splitClips: Array<{ id: string; clip: Clip; parentId: string }> } => {
-    if (!clips) return { topLevelClips: [], splitClips: [] };
-    const topLevelClips: Array<{ id: string; clip: Clip }> = [];
-    const splitClips: Array<{ id: string; clip: Clip; parentId: string }> = [];
-    
-    clips.forEach((clip, id) => {
-      if (clip.parentId) {
-        splitClips.push({ id, clip, parentId: clip.parentId });
-      } else {
-        topLevelClips.push({ id, clip });
-      }
-    });
-    
-    return { topLevelClips, splitClips };
-  };
 
   const handleClipClick = (clip: ClipInfo) => {
     console.log('Clip clicked:', clip.fileName);
@@ -56,13 +26,6 @@ function ImportArea({ onFileLoaded, onImportClick, onClipSelect, selectedClipPat
         duration: clip.duration,
         fileName: clip.fileName
       });
-    }
-  };
-  
-  const handleClipItemClick = (clipId: string, clip: Clip) => {
-    console.log('Clip item clicked:', clipId);
-    if (onClipSelect) {
-      onClipSelect(clip.filePath, clip.metadata, clipId);
     }
   };
 
@@ -243,73 +206,6 @@ function ImportArea({ onFileLoaded, onImportClick, onClipSelect, selectedClipPat
               ))}
             </div>
           )}
-          
-          {/* Display clips from clips Map */}
-          {clips && clips.size > 0 && (() => {
-            const { topLevelClips, splitClips } = getTopLevelClips();
-            return (
-              <div className="space-y-2">
-                {topLevelClips.map(({ id, clip }) => {
-                  const children = splitClips.filter(sc => sc.parentId === id);
-                  return (
-                    <div key={id} className="space-y-1">
-                      {/* Original/Parent Clip */}
-                      <div 
-                        onClick={() => handleClipItemClick(id, clip)}
-                        className={`border rounded-lg bg-[#1a1a1a] overflow-hidden transition-colors cursor-pointer ${
-                          activeClipId === id 
-                            ? 'border-blue-500 bg-[#1a2a3a]' 
-                            : 'border-[#3a3a3a] hover:border-[#4a4a4a]'
-                        }`}
-                      >
-                        <div className="p-3">
-                          <div className="flex items-center gap-2">
-                            <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                            </svg>
-                            <p className="text-sm text-white font-medium truncate">{clip.fileName}</p>
-                            {clip.isSplit && <span className="text-xs text-blue-400">• Split</span>}
-                          </div>
-                          <p className="text-xs text-gray-400 mt-1">
-                            {Math.floor(clip.inTime)}s - {Math.floor(clip.outTime)}s ({Math.floor(clip.outTime - clip.inTime)}s)
-                          </p>
-                        </div>
-                      </div>
-                      
-                      {/* Child/Split Clips */}
-                      {children.length > 0 && (
-                        <div className="ml-4 space-y-1 border-l-2 border-[#3a3a3a] pl-2">
-                          {children.map(({ id: childId, clip: childClip }) => (
-                            <div 
-                              key={childId}
-                              onClick={() => handleClipItemClick(childId, childClip)}
-                              className={`border rounded bg-[#1a1a1a] overflow-hidden transition-colors cursor-pointer ${
-                                activeClipId === childId 
-                                  ? 'border-blue-500 bg-[#1a2a3a]' 
-                                  : 'border-[#3a3a3a] hover:border-[#4a4a4a]'
-                              }`}
-                            >
-                              <div className="p-2">
-                                <div className="flex items-center gap-2">
-                                  <svg className="w-3 h-3 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-                                  </svg>
-                                  <p className="text-xs text-white font-medium truncate">Split Clip</p>
-                                </div>
-                                <p className="text-xs text-gray-400 mt-1">
-                                  {Math.floor(childClip.inTime)}s - {Math.floor(childClip.outTime)}s ({Math.floor(childClip.outTime - childClip.inTime)}s)
-                                </p>
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            );
-          })()}
           
           {/* Always show the drag-and-drop area for adding more clips */}
           <div

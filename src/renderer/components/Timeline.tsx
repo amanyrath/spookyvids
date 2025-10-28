@@ -1,16 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 
-interface Clip {
-  id: string;
-  parentId?: string;
-  filePath: string;
-  fileName: string;
-  metadata: any;
-  inTime: number;
-  outTime: number;
-  isSplit: boolean;
-}
-
 interface TimelineProps {
   currentFile: string | null;
   duration: number;
@@ -18,11 +7,9 @@ interface TimelineProps {
   outTime: number;
   playheadTime: number;
   onTimeUpdate: (inTime: number, outTime: number, playheadTime: number, skipHistory?: boolean) => void;
-  clips?: Map<string, Clip>;
-  activeClipId?: string | null;
 }
 
-function Timeline({ currentFile, duration, inTime, outTime, playheadTime, onTimeUpdate, clips, activeClipId }: TimelineProps) {
+function Timeline({ currentFile, duration, inTime, outTime, playheadTime, onTimeUpdate }: TimelineProps) {
   const [isDragging, setIsDragging] = useState<'in' | 'out' | 'playhead' | null>(null);
   const [dragStartState, setDragStartState] = useState<{ inTime: number; outTime: number; playheadTime: number } | null>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
@@ -113,8 +100,6 @@ function Timeline({ currentFile, duration, inTime, outTime, playheadTime, onTime
             <span>Scrub</span>
             <kbd className="px-2 py-1 bg-[#2a2a2a] rounded border border-[#3a3a3a]">Space</kbd>
             <span>Play</span>
-            <kbd className="px-2 py-1 bg-[#2a2a2a] rounded border border-[#3a3a3a]">⌘T</kbd>
-            <span>Split</span>
           </div>
           <div className="flex items-center gap-2">
             <button 
