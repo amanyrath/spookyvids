@@ -5,6 +5,10 @@ node_modules/
 dist/
 build/
 
+# Documentation/Process files
+process-docs/
+main.json
+
 # Logs
 *.log
 npm-debug.log*
@@ -20,6 +24,9 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
+# Process docs (internal, not versioned)
+process-docs/
 
 # Cursor AI
 .cursor/
