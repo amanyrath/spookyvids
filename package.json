@@ -1,0 +1,62 @@
+{
+  "name": "spookyvids",
+  "version": "1.0.0",
+  "description": "",
+  "main": "dist/main.js",
+  "scripts": {
+    "start": "npm run build && electron .",
+    "build": "tsc -p tsconfig.json && webpack",
+    "build:main": "tsc -p tsconfig.json",
+    "build:renderer": "webpack",
+    "package": "npm run build && electron-builder --dir",
+    "package:dmg": "npm run build && electron-builder --mac dmg"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/amanyrath/spookyvids.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/amanyrath/spookyvids/issues"
+  },
+  "homepage": "https://github.com/amanyrath/spookyvids#readme",
+  "build": {
+    "appId": "com.clipforge.app",
+    "productName": "ClipForge",
+    "mac": {
+      "category": "public.app-category.video"
+    },
+    "files": [
+      "dist/**/*",
+      "node_modules/**/*",
+      "package.json"
+    ]
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.1.16",
+    "@types/fluent-ffmpeg": "^2.1.28",
+    "@types/node": "^24.9.1",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "autoprefixer": "^10.4.21",
+    "css-loader": "^7.1.2",
+    "electron": "^39.0.0",
+    "electron-builder": "^26.0.12",
+    "html-webpack-plugin": "^5.6.4",
+    "postcss": "^8.5.6",
+    "postcss-loader": "^8.2.0",
+    "style-loader": "^4.0.0",
+    "tailwindcss": "^3.4.18",
+    "ts-loader": "^9.5.4",
+    "typescript": "^5.9.3",
+    "webpack": "^5.102.1",
+    "webpack-cli": "^6.0.1"
+  },
+  "dependencies": {
+    "fluent-ffmpeg": "^2.1.3",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  }
+}
