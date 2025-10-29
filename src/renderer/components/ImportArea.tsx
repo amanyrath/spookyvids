@@ -4,7 +4,9 @@ interface ImportAreaProps {
   onFileLoaded?: (filePath: string, fileName: string, metadata?: any) => void;
   onImportClick?: () => void;
   onClipSelect?: (filePath: string, metadata?: any) => void;
+  onClipDragToTimeline?: (filePath: string, fileName: string, metadata: any, insertIndex?: number) => void;
   selectedClipPath?: string | null;
+  libraryClips?: Array<{ filePath: string; fileName: string; metadata: any }>;
 }
 
 interface ClipInfo {
@@ -12,21 +14,43 @@ interface ClipInfo {
   filePath: string;
   thumbnail?: string;
   duration?: number;
+  metadata?: any;
 }
 
-function ImportArea({ onFileLoaded, onImportClick, onClipSelect, selectedClipPath }: ImportAreaProps) {
+function ImportArea({ onFileLoaded, onImportClick, onClipSelect, onClipDragToTimeline, selectedClipPath, libraryClips }: ImportAreaProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [loadedClips, setLoadedClips] = useState<ClipInfo[]>([]);
+
+  // Sync loadedClips with libraryClips from parent
+  useEffect(() => {
+    if (libraryClips) {
+      const updatedClips = libraryClips.map(clip => ({
+        fileName: clip.fileName,
+        filePath: clip.filePath,
+        thumbnail: clip.metadata?.thumbnail,
+        duration: clip.metadata?.duration,
+        metadata: clip.metadata
+      }));
+      setLoadedClips(updatedClips);
+    }
+  }, [libraryClips]);
 
   const handleClipClick = (clip: ClipInfo) => {
     console.log('Clip clicked:', clip.fileName);
     if (onClipSelect) {
-      onClipSelect(clip.filePath, {
-        filePath: clip.filePath,
-        duration: clip.duration,
-        fileName: clip.fileName
-      });
+      onClipSelect(clip.filePath, clip.metadata);
     }
+  };
+
+  const handleClipDragStart = (e: React.DragEvent, clip: ClipInfo) => {
+    console.log('Drag start:', clip.fileName);
+    // Store clip data for drag operation
+    e.dataTransfer.setData('application/json', JSON.stringify({
+      filePath: clip.filePath,
+      fileName: clip.fileName,
+      metadata: clip.metadata
+    }));
+    e.dataTransfer.effectAllowed = 'copy';
   };
 
   const handleClick = () => {
@@ -175,7 +199,9 @@ function ImportArea({ onFileLoaded, onImportClick, onClipSelect, selectedClipPat
                 <div 
                   key={index} 
                   onClick={() => handleClipClick(clip)}
-                  className={`border rounded-lg bg-[#1a1a1a] overflow-hidden transition-colors cursor-pointer ${
+                  draggable
+                  onDragStart={(e) => handleClipDragStart(e, clip)}
+                  className={`border rounded-lg bg-[#1a1a1a] overflow-hidden transition-colors cursor-move ${
                     selectedClipPath === clip.filePath 
                       ? 'border-purple-700 bg-[#2a1a3a]' 
                       : 'border-[#3a3a3a] hover:border-[#4a4a4a]'

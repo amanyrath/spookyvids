@@ -20,65 +20,161 @@ declare global {
   }
 }
 
+// Clip interface for timeline management
+interface TimelineClip {
+  id: string;
+  filePath: string;
+  fileName: string;
+  metadata: any;
+  startTime: number; // Position on timeline
+  duration: number; // Clip duration (outTime - inTime)
+  inTime: number; // Trim start
+  outTime: number; // Trim end
+}
+
 function App() {
-  const [currentFile, setCurrentFile] = useState<string | null>(null);
-  const [fileMetadata, setFileMetadata] = useState<any>(null);
-  const [inTime, setInTime] = useState<number>(0);
-  const [outTime, setOutTime] = useState<number>(0);
+  // Media library clips (imported but not on timeline)
+  const [libraryClips, setLibraryClips] = useState<Array<{ filePath: string; fileName: string; metadata: any }>>([]);
+  
+  // Timeline clips (added to timeline)
+  const [timelineClips, setTimelineClips] = useState<TimelineClip[]>([]);
+  
+  // Selected clip in library (for preview only)
+  const [selectedLibraryClip, setSelectedLibraryClip] = useState<{ filePath: string; metadata: any } | null>(null);
+  
+  // Focused clip on timeline (shows trim handles)
+  const [focusedClipId, setFocusedClipId] = useState<string | null>(null);
+  
+  // Playback state
   const [playheadTime, setPlayheadTime] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   
-  // Undo/Redo history for trimming
-  const [history, setHistory] = useState<Array<{ inTime: number; outTime: number; playheadTime: number }>>([]);
+  // Undo/Redo history for timeline operations
+  const [history, setHistory] = useState<Array<{ timelineClips: TimelineClip[]; playheadTime: number }>>([]);
   const [historyIndex, setHistoryIndex] = useState<number>(-1);
+  
+  // Export state
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [exportProgress, setExportProgress] = useState<number>(0);
   const [exportError, setExportError] = useState<string | null>(null);
   const [exportSuccess, setExportSuccess] = useState<string | null>(null);
 
+
+  // Handle file loaded from import (adds to library, not timeline)
   const handleFileLoaded = (filePath: string, fileName: string, metadata?: any) => {
     console.log('File loaded in App:', filePath, fileName, metadata);
-    setCurrentFile(filePath);
-    setFileMetadata(metadata);
-    // Initialize trim times when file is loaded
-    if (metadata?.duration) {
-      setInTime(0);
-      setOutTime(metadata.duration);
-      setPlayheadTime(0);
-    }
+    
+    // Add to library clips
+    setLibraryClips(prev => {
+      // Check if already exists
+      const exists = prev.some(clip => clip.filePath === filePath);
+      if (exists) return prev;
+      return [...prev, { filePath, fileName, metadata }];
+    });
   };
 
+  // Handle clip selected from library (loads in preview only, not timeline)
   const handleClipSelect = (filePath: string, metadata?: any) => {
-    console.log('Clip selected:', filePath);
-    setCurrentFile(filePath);
-    setFileMetadata(metadata);
-    // Reset trim times when switching clips
-    if (metadata?.duration) {
-      setInTime(0);
-      setOutTime(metadata.duration);
-      setPlayheadTime(0);
-    }
+    console.log('Clip selected from library:', filePath);
+    setSelectedLibraryClip({ filePath, metadata });
+    setFocusedClipId(null); // Deselect timeline clip
+    setIsPlaying(false);
+    setPlayheadTime(0);
   };
   
-  const handleTimeUpdate = (inTime: number, outTime: number, playheadTime: number, skipHistory?: boolean) => {
-    setInTime(inTime);
-    setOutTime(outTime);
-    setPlayheadTime(playheadTime);
+  // Handle clip added to timeline from library
+  const handleAddClipToTimeline = (filePath: string, fileName: string, metadata: any, insertIndex?: number) => {
+    console.log('Adding clip to timeline:', fileName, 'insertIndex:', insertIndex);
     
-    // Add to history for undo/redo (unless skipHistory is true)
-    if (!skipHistory) {
-      const newState = { inTime, outTime, playheadTime };
-      setHistory(prev => {
-        // Remove any history after current index (if we're in the middle of history)
-        const newHistory = prev.slice(0, historyIndex + 1);
-        // Add new state
-        const updatedHistory = [...newHistory, newState];
-        // Keep only last 50 states
+    const newClip: TimelineClip = {
+      id: `clip-${Date.now()}-${Math.random()}`,
+      filePath,
+      fileName,
+      metadata,
+      startTime: 0, // Will be calculated
+      duration: metadata?.duration || 0,
+      inTime: 0,
+      outTime: metadata?.duration || 0,
+    };
+    
+    setTimelineClips(prev => {
+      let newClips: TimelineClip[];
+      
+      if (insertIndex !== undefined && insertIndex >= 0 && insertIndex < prev.length) {
+        // Insert at specific position
+        newClips = [...prev.slice(0, insertIndex), newClip, ...prev.slice(insertIndex)];
+      } else {
+        // Add to end
+        newClips = [...prev, newClip];
+      }
+      
+      // Recalculate startTime for all clips
+      let currentTime = 0;
+      const updatedClips = newClips.map(clip => {
+        const updatedClip = { ...clip, startTime: currentTime };
+        currentTime += (clip.outTime - clip.inTime);
+        return updatedClip;
+      });
+      
+      console.log('Updated timeline clips:', updatedClips);
+      
+      // Add to history with the new clips
+      setHistory(prevHistory => {
+        const newHistory = prevHistory.slice(0, historyIndex + 1);
+        const updatedHistory = [...newHistory, { timelineClips: updatedClips, playheadTime }];
         return updatedHistory.slice(-50);
       });
       setHistoryIndex(prev => prev + 1);
-    }
+      
+      return updatedClips;
+    });
   };
+  
+  // Update clip trim points
+  const handleClipTrimUpdate = (clipId: string, inTime: number, outTime: number, skipHistory?: boolean) => {
+    setTimelineClips(prev => {
+      // Update the trimmed clip
+      const updatedClips = prev.map(clip => {
+        if (clip.id === clipId) {
+          const newDuration = outTime - inTime;
+          return { ...clip, inTime, outTime, duration: newDuration };
+        }
+        return clip;
+      });
+      
+      // Recalculate startTime for ALL clips sequentially (no gaps)
+      let currentTime = 0;
+      const finalClips = updatedClips.map(clip => {
+        const updatedClip = { ...clip, startTime: currentTime };
+        currentTime += (clip.outTime - clip.inTime);
+        return updatedClip;
+      });
+      
+      // Only add to history if not skipping (at end of drag)
+      if (!skipHistory) {
+        setHistory(prevHistory => {
+          const newHistory = prevHistory.slice(0, historyIndex + 1);
+          const updatedHistory = [...newHistory, { timelineClips: finalClips, playheadTime }];
+          return updatedHistory.slice(-50);
+        });
+        setHistoryIndex(prev => prev + 1);
+      }
+      
+      return finalClips;
+    });
+  };
+  
+  // Calculate total timeline duration
+  const getTotalDuration = () => {
+    if (timelineClips.length === 0) return 0;
+    const lastClip = timelineClips[timelineClips.length - 1];
+    return lastClip.startTime + (lastClip.outTime - lastClip.inTime);
+  };
+
+  // Debug: log timeline clips when they change
+  useEffect(() => {
+    console.log('Timeline clips updated:', timelineClips);
+  }, [timelineClips]);
 
   const handleImportVideo = async () => {
     if (!window.electronAPI) {
@@ -114,15 +210,14 @@ function App() {
       return;
     }
 
-    if (!currentFile) {
-      alert('Please import a video first');
+    if (timelineClips.length === 0) {
+      alert('Please add clips to the timeline first');
       return;
     }
 
-    if (inTime >= outTime) {
-      alert('Invalid trim settings. End time must be after start time.');
-      return;
-    }
+    // TODO: Implement concatenation export for multiple clips
+    // For now, export first clip only
+    const firstClip = timelineClips[0];
 
     try {
       setIsExporting(true);
@@ -130,8 +225,8 @@ function App() {
       setExportError(null);
 
       const result = await window.electronAPI.exportVideo({
-        inTime,
-        outTime
+        inTime: firstClip.inTime,
+        outTime: firstClip.outTime
       });
 
       if (result.canceled) {
@@ -167,8 +262,7 @@ function App() {
         e.preventDefault();
         if (historyIndex > 0 && history.length > 0) {
           const prevState = history[historyIndex - 1];
-          setInTime(prevState.inTime);
-          setOutTime(prevState.outTime);
+          setTimelineClips(prevState.timelineClips);
           setPlayheadTime(prevState.playheadTime);
           setHistoryIndex(historyIndex - 1);
           console.log('Undo to:', prevState);
@@ -180,8 +274,7 @@ function App() {
         e.preventDefault();
         if (historyIndex < history.length - 1 && history.length > 0) {
           const nextState = history[historyIndex + 1];
-          setInTime(nextState.inTime);
-          setOutTime(nextState.outTime);
+          setTimelineClips(nextState.timelineClips);
           setPlayheadTime(nextState.playheadTime);
           setHistoryIndex(historyIndex + 1);
           console.log('Redo to:', nextState);
@@ -189,13 +282,14 @@ function App() {
       }
 
       // Arrow keys to navigate playhead
-      if (!isExporting && fileMetadata?.duration) {
+      if (!isExporting && timelineClips.length > 0) {
         if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
           e.preventDefault();
-          const step = e.shiftKey ? 2.5 : 0.5; // Shift + arrow = 2.5s, regular arrow = 0.5s (5x bigger)
+          const step = e.shiftKey ? 2.5 : 0.5;
           const direction = e.key === 'ArrowRight' ? 1 : -1;
+          const totalDuration = getTotalDuration();
           setPlayheadTime(prev => {
-            const newTime = Math.max(inTime, Math.min(outTime, prev + (direction * step)));
+            const newTime = Math.max(0, Math.min(totalDuration, prev + (direction * step)));
             return newTime;
           });
         }
@@ -210,7 +304,7 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [history, historyIndex, isExporting, inTime, outTime, fileMetadata, playheadTime]);
+  }, [history, historyIndex, isExporting, timelineClips, playheadTime]);
 
   // Set up IPC event listeners
   useEffect(() => {
@@ -284,7 +378,7 @@ function App() {
           </button>
           <button 
             onClick={handleExportVideo}
-            disabled={isExporting || !currentFile}
+            disabled={isExporting || timelineClips.length === 0}
             className="px-4 py-2 bg-purple-900 hover:bg-purple-800 rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed relative min-w-[100px]"
           >
             {isExporting ? (
@@ -307,15 +401,18 @@ function App() {
             onFileLoaded={handleFileLoaded} 
             onImportClick={handleImportVideo}
             onClipSelect={handleClipSelect}
-            selectedClipPath={currentFile}
+            onClipDragToTimeline={handleAddClipToTimeline}
+            selectedClipPath={selectedLibraryClip?.filePath || null}
+            libraryClips={libraryClips}
           />
         </div>
 
         {/* Preview Area */}
         <div className="flex-1 bg-[#0d0d0d]">
           <PreviewPlayer 
-            filePath={currentFile} 
-            metadata={fileMetadata} 
+            filePath={selectedLibraryClip?.filePath || null}
+            metadata={selectedLibraryClip?.metadata}
+            timelineClips={timelineClips}
             playheadTime={playheadTime}
             isPlaying={isPlaying}
             setIsPlaying={setIsPlaying}
@@ -327,12 +424,14 @@ function App() {
       {/* Timeline */}
       <div className="h-40 bg-[#1a1a1a] border-t border-[#3a3a3a]">
         <Timeline 
-          currentFile={currentFile}
-          duration={fileMetadata?.duration || 0}
-          inTime={inTime}
-          outTime={outTime}
+          timelineClips={timelineClips}
+          focusedClipId={focusedClipId}
           playheadTime={playheadTime}
-          onTimeUpdate={handleTimeUpdate}
+          onClipTrimUpdate={handleClipTrimUpdate}
+          onClipFocus={setFocusedClipId}
+          onPlayheadUpdate={setPlayheadTime}
+          onClipReorder={(newClips) => setTimelineClips(newClips)}
+          onClipDrop={handleAddClipToTimeline}
         />
       </div>
     </div>

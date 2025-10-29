@@ -2,4 +2,15 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Disable pinch-to-zoom globally */
+body {
+  touch-action: pan-x pan-y;
+  overscroll-behavior: none;
+}
+
+/* Prevent zoom on double-tap */
+* {
+  touch-action: manipulation;
+}
+
 
