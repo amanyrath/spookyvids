@@ -44,11 +44,16 @@ function ImportArea({ onFileLoaded, onImportClick, onClipSelect, onClipDragToTim
 
   const handleClipDragStart = (e: React.DragEvent, clip: ClipInfo) => {
     console.log('Drag start:', clip.fileName);
-    // Store clip data for drag operation
+    // Store clip data for drag operation - reconstruct full metadata
     e.dataTransfer.setData('application/json', JSON.stringify({
       filePath: clip.filePath,
       fileName: clip.fileName,
-      metadata: clip.metadata
+      metadata: {
+        filePath: clip.filePath,
+        duration: clip.duration || 0,
+        thumbnail: clip.thumbnail,
+        ...clip.metadata
+      }
     }));
     e.dataTransfer.effectAllowed = 'copy';
   };

@@ -3,6 +3,30 @@ import * as path from 'path';
 import * as fs from 'fs';
 import ffmpeg from 'fluent-ffmpeg';
 
+// Set ffmpeg path - use bundled ffmpeg if available, otherwise use system ffmpeg
+const possiblePaths = [
+  // Bundled ffmpeg (in packaged app)
+  path.join(process.resourcesPath || '', 'ffmpeg', process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg'),
+  // System ffmpeg locations
+  ...(process.platform === 'darwin' ? [
+    '/usr/local/bin/ffmpeg',
+    '/opt/homebrew/bin/ffmpeg',
+    '/usr/bin/ffmpeg'
+  ] : []),
+  ...(process.platform === 'win32' ? [
+    'C:\\ffmpeg\\bin\\ffmpeg.exe',
+    'ffmpeg.exe'
+  ] : [])
+];
+
+for (const ffmpegPath of possiblePaths) {
+  if (fs.existsSync(ffmpegPath)) {
+    ffmpeg.setFfmpegPath(ffmpegPath);
+    console.log('Set ffmpeg path to:', ffmpegPath);
+    break;
+  }
+}
+
 let currentFilePath: string | null = null;
 let mainWindow: any = null;
 

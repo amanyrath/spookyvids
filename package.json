@@ -9,9 +9,10 @@
     "build:main": "tsc -p tsconfig.json",
     "build:renderer": "webpack",
     "copy:preload": "cp src/main/preload.js dist/",
+    "bundle:ffmpeg": "node scripts/bundle-ffmpeg.js",
     "create:icon": "node scripts/create-icon.js && iconutil -c icns build/icon.iconset -o build/icon.icns && rm -rf build/icon.iconset",
-    "package": "npm run build && electron-builder --dir",
-    "package:dmg": "npm run build && electron-builder --mac dmg"
+    "package": "npm run build && npm run bundle:ffmpeg && electron-builder --dir",
+    "package:dmg": "npm run build && npm run bundle:ffmpeg && electron-builder --mac dmg"
   },
   "repository": {
     "type": "git",
@@ -26,7 +27,7 @@
   "homepage": "https://github.com/amanyrath/spookyvids#readme",
   "build": {
     "appId": "com.clipforge.app",
-    "productName": "ClipForge",
+    "productName": "Spooky Clips",
     "mac": {
       "category": "public.app-category.video",
       "icon": "build/icon.icns",
@@ -35,7 +36,8 @@
     "files": [
       "dist/**/*",
       "node_modules/**/*",
-      "package.json"
+      "package.json",
+      "build/ffmpeg/**/*"
     ]
   },
   "devDependencies": {
