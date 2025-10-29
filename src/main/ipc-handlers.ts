@@ -1,7 +1,7 @@
 import { ipcMain, dialog, app } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
-import ffmpeg from 'fluent-ffmpeg';
+import ffmpeg, { FfmpegCommand } from 'fluent-ffmpeg';
 
 // Set ffmpeg path - use bundled ffmpeg if available, otherwise use system ffmpeg
 const possiblePaths = [
@@ -37,17 +37,25 @@ export function setMainWindow(window: any) {
 export function setupIpcHandlers() {
   // Handle opening file dialog (allow multiple files)
   ipcMain.handle('open-file-dialog', async () => {
-    const result = await dialog.showOpenDialog(mainWindow, {
-      properties: ['openFile', 'multiSelections'],
-      filters: [
-        { name: 'Videos', extensions: ['mp4', 'mov'] }
-      ]
-    });
+    try {
+      console.log('Opening file dialog...');
+      const result = await dialog.showOpenDialog(mainWindow, {
+        properties: ['openFile', 'multiSelections'],
+        filters: [
+          { name: 'Videos', extensions: ['mp4', 'mov'] }
+        ]
+      });
 
-    if (!result.canceled && result.filePaths.length > 0) {
-      return result.filePaths;  // Return array of file paths
+      console.log('Dialog result:', { canceled: result.canceled, files: result.filePaths?.length || 0 });
+
+      if (!result.canceled && result.filePaths && result.filePaths.length > 0) {
+        return result.filePaths;  // Return array of file paths
+      }
+      return [];
+    } catch (error) {
+      console.error('Error opening file dialog:', error);
+      return [];
     }
-    return [];
   });
 
   // Handle file dropped from renderer
@@ -179,13 +187,14 @@ export function setupIpcHandlers() {
   });
   
   // Handle export request from renderer
-  ipcMain.handle('export-request', async (event, { inTime, outTime, outputPath }) => {
-    if (!currentFilePath) {
-      return { success: false, error: 'No video loaded' };
+  ipcMain.handle('export-request', async (event, { clips, outputPath }) => {
+    // clips format: [{ filePath, inTime, outTime }]
+    if (!clips || clips.length === 0) {
+      return { success: false, error: 'No clips to export' };
     }
 
     try {
-      console.log('Export request:', { inTime, outTime, outputPath });
+      console.log('Export request:', { clips: clips.length, outputPath });
 
       // If no output path provided, show save dialog
       let finalOutputPath = outputPath;
@@ -210,30 +219,83 @@ export function setupIpcHandlers() {
       }
 
       console.log('Starting export to:', finalOutputPath);
-      console.log('Trim settings:', { inTime, outTime, duration: outTime - inTime });
+
+      // Calculate total duration for progress tracking
+      const totalDuration = clips.reduce((sum: number, clip: any) => sum + (clip.outTime - clip.inTime), 0);
+      console.log('Total duration:', totalDuration);
 
       // Execute ffmpeg export
       await new Promise<void>((resolve, reject) => {
-        if (!currentFilePath) {
-          reject(new Error('No video file loaded'));
-          return;
+        // Create concat filter for multiple clips
+        let command: FfmpegCommand;
+        
+        if (clips.length === 1) {
+          // Single clip - simple trim
+          command = ffmpeg(clips[0].filePath)
+            .seek(clips[0].inTime)
+            .duration(clips[0].outTime - clips[0].inTime)
+            .videoCodec('libx264')
+            .outputOptions('-crf 23')
+            .outputOptions('-preset medium')
+            .audioCodec('aac')
+            .audioBitrate('192k')
+            .output(finalOutputPath);
+        } else {
+          // Multiple clips - trim each and concatenate using complex filter
+          command = ffmpeg();
+          
+          // Add all clips as inputs
+          clips.forEach((clip: any) => {
+            command = command.input(clip.filePath);
+          });
+          
+          // Build complex filter: trim each input, then concatenate
+          const filterComplex: string[] = [];
+          
+          // Add trim filters for each input
+          clips.forEach((clip: any, index: number) => {
+            const duration = clip.outTime - clip.inTime;
+            filterComplex.push(
+              `[${index}:v]trim=start=${clip.inTime}:duration=${duration},setpts=PTS-STARTPTS[v${index}]`
+            );
+            filterComplex.push(
+              `[${index}:a]atrim=start=${clip.inTime}:duration=${duration},asetpts=PTS-STARTPTS[a${index}]`
+            );
+          });
+          
+          // Build concat input string
+          const concatInputs: string[] = [];
+          clips.forEach((clip: any, index: number) => {
+            concatInputs.push(`[v${index}][a${index}]`);
+          });
+          
+          // Add concat filter
+          filterComplex.push(
+            `${concatInputs.join('')}concat=n=${clips.length}:v=1:a=1[outv][outa]`
+          );
+          
+          console.log('Complex filters:', filterComplex);
+          
+          command = command
+            .complexFilter(filterComplex)
+            .outputOptions(['-map', '[outv]', '-map', '[outa]'])
+            .videoCodec('libx264')
+            .outputOptions('-crf 23')
+            .outputOptions('-preset fast')
+            .audioCodec('aac')
+            .audioBitrate('192k')
+            .output(finalOutputPath);
         }
 
-        const command = ffmpeg(currentFilePath)
-          .seek(inTime)
-          .duration(outTime - inTime)
-          .videoCodec('libx264')
-          .outputOptions('-crf 23')
-          .outputOptions('-preset medium')
-          .audioCodec('aac')
-          .audioBitrate('192k')
-          .output(finalOutputPath)
+        command
           .on('start', (commandLine) => {
             console.log('FFmpeg command:', commandLine);
           })
           .on('progress', (progress) => {
-            const percent = progress.percent || 0;
-            console.log('Export progress:', percent + '%');
+            let percent = progress.percent || 0;
+            // Cap progress at 100% (complex filters can report over 100%)
+            percent = Math.min(100, Math.max(0, percent));
+            console.log('Export progress:', percent.toFixed(1) + '%');
             // Send progress to renderer
             if (mainWindow) {
               mainWindow.webContents.send('export-progress', { percent });
@@ -266,7 +328,7 @@ export function setupIpcHandlers() {
       return { 
         success: true, 
         outputPath: finalOutputPath,
-        duration: outTime - inTime
+        duration: totalDuration
       };
     } catch (error: any) {
       console.error('Export failed:', error);
@@ -274,6 +336,71 @@ export function setupIpcHandlers() {
         success: false, 
         error: error.message || 'Export failed' 
       };
+    }
+  });
+  
+  // Handle save project request
+  ipcMain.handle('save-project', async (event, { clips, libraryClips }) => {
+    try {
+      console.log('Save project request:', { timelineClips: clips?.length, libraryClips: libraryClips?.length });
+      
+      const result = await dialog.showSaveDialog(mainWindow, {
+        defaultPath: 'project.json',
+        filters: [
+          { name: 'Project Files', extensions: ['json'] }
+        ]
+      });
+
+      if (result.canceled || !result.filePath) {
+        return { success: false, canceled: true };
+      }
+
+      const projectData = {
+        version: '1.0',
+        timelineClips: clips || [],
+        libraryClips: libraryClips || []
+      };
+
+      fs.writeFileSync(result.filePath, JSON.stringify(projectData, null, 2), 'utf-8');
+      
+      console.log('Project saved successfully to:', result.filePath);
+      return { success: true, filePath: result.filePath };
+    } catch (error: any) {
+      console.error('Error saving project:', error);
+      return { success: false, error: error.message || 'Failed to save project' };
+    }
+  });
+  
+  // Handle load project request
+  ipcMain.handle('load-project', async () => {
+    try {
+      console.log('Load project request');
+      
+      const result = await dialog.showOpenDialog(mainWindow, {
+        properties: ['openFile'],
+        filters: [
+          { name: 'Project Files', extensions: ['json'] }
+        ]
+      });
+
+      if (result.canceled || !result.filePaths || result.filePaths.length === 0) {
+        return { success: false, canceled: true };
+      }
+
+      const filePath = result.filePaths[0];
+      const fileContent = fs.readFileSync(filePath, 'utf-8');
+      const projectData = JSON.parse(fileContent);
+      
+      console.log('Project loaded successfully from:', filePath);
+      console.log('Project data:', { 
+        timelineClips: projectData.timelineClips?.length,
+        libraryClips: projectData.libraryClips?.length
+      });
+      
+      return { success: true, data: projectData, filePath };
+    } catch (error: any) {
+      console.error('Error loading project:', error);
+      return { success: false, error: error.message || 'Failed to load project' };
     }
   });
   

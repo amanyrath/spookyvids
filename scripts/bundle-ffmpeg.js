@@ -58,7 +58,19 @@ if (!fs.existsSync(resourcesDir)) {
 const destPath = path.join(resourcesDir, platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg');
 
 try {
+  // Remove existing file if it exists
+  if (fs.existsSync(destPath)) {
+    console.log('FFmpeg already exists at destination, removing...');
+    fs.unlinkSync(destPath);
+  }
+  
   fs.copyFileSync(ffmpegPath, destPath);
+  
+  // Make the file executable on Unix-like systems
+  if (platform !== 'win32') {
+    fs.chmodSync(destPath, 0o755);
+  }
+  
   console.log('FFmpeg bundled successfully to:', destPath);
 } catch (error) {
   console.error('Error copying ffmpeg:', error.message);

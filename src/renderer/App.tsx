@@ -12,10 +12,12 @@ declare global {
       getFilePath: (file: File) => string;
       onFileValidated: (callback: (event: any, data: any) => void) => (() => void);
       onFileError: (callback: (event: any, error: any) => void) => (() => void);
-      exportVideo: (data: { inTime: number; outTime: number; outputPath?: string }) => Promise<any>;
+      exportVideo: (data: { clips: Array<{ filePath: string; inTime: number; outTime: number }>; outputPath?: string }) => Promise<any>;
       onExportProgress: (callback: (event: any, data: any) => void) => (() => void);
       onExportComplete: (callback: (event: any, data: any) => void) => (() => void);
       onExportError: (callback: (event: any, data: any) => void) => (() => void);
+      saveProject: (data: { clips: TimelineClip[]; libraryClips: any[] }) => Promise<any>;
+      loadProject: () => Promise<any>;
     };
   }
 }
@@ -215,9 +217,12 @@ function App() {
       return;
     }
 
-    // TODO: Implement concatenation export for multiple clips
-    // For now, export first clip only
-    const firstClip = timelineClips[0];
+    // Prepare clips array for export
+    const clips = timelineClips.map(clip => ({
+      filePath: clip.filePath,
+      inTime: clip.inTime,
+      outTime: clip.outTime
+    }));
 
     try {
       setIsExporting(true);
@@ -225,8 +230,7 @@ function App() {
       setExportError(null);
 
       const result = await window.electronAPI.exportVideo({
-        inTime: firstClip.inTime,
-        outTime: firstClip.outTime
+        clips: clips
       });
 
       if (result.canceled) {
@@ -246,6 +250,77 @@ function App() {
       setExportError(error.message || 'Export failed');
     } finally {
       // Note: isExporting will be set to false by the event listener
+    }
+  };
+
+  const handleSaveProject = async () => {
+    if (!window.electronAPI) {
+      console.error('electronAPI not available');
+      return;
+    }
+
+    try {
+      const result = await window.electronAPI.saveProject({
+        clips: timelineClips,
+        libraryClips: libraryClips
+      });
+
+      if (result.canceled) {
+        console.log('Save canceled by user');
+        return;
+      }
+
+      if (result.success) {
+        console.log('Project saved to:', result.filePath);
+        setExportSuccess(`Project saved to: ${result.filePath}`);
+      } else {
+        console.error('Save failed:', result.error);
+        setExportError(result.error || 'Failed to save project');
+      }
+    } catch (error: any) {
+      console.error('Error saving project:', error);
+      setExportError(error.message || 'Failed to save project');
+    }
+  };
+
+  const handleLoadProject = async () => {
+    if (!window.electronAPI) {
+      console.error('electronAPI not available');
+      return;
+    }
+
+    try {
+      const result = await window.electronAPI.loadProject();
+
+      if (result.canceled) {
+        console.log('Load canceled by user');
+        return;
+      }
+
+      if (result.success) {
+        const projectData = result.data;
+        console.log('Project loaded:', projectData);
+        
+        // Restore timeline clips
+        if (projectData.timelineClips) {
+          setTimelineClips(projectData.timelineClips);
+          // Reset playhead to start
+          setPlayheadTime(0);
+        }
+        
+        // Restore library clips
+        if (projectData.libraryClips) {
+          setLibraryClips(projectData.libraryClips);
+        }
+        
+        setExportSuccess(`Project loaded from: ${result.filePath}`);
+      } else {
+        console.error('Load failed:', result.error);
+        setExportError(result.error || 'Failed to load project');
+      }
+    } catch (error: any) {
+      console.error('Error loading project:', error);
+      setExportError(error.message || 'Failed to load project');
     }
   };
 
@@ -375,6 +450,20 @@ function App() {
             className="px-4 py-2 bg-[#3a3a3a] hover:bg-[#4a4a4a] rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Import Video
+          </button>
+          <button 
+            onClick={handleLoadProject}
+            disabled={isExporting}
+            className="px-4 py-2 bg-[#3a3a3a] hover:bg-[#4a4a4a] rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Load Project
+          </button>
+          <button 
+            onClick={handleSaveProject}
+            disabled={isExporting}
+            className="px-4 py-2 bg-[#3a3a3a] hover:bg-[#4a4a4a] rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Save Project
           </button>
           <button 
             onClick={handleExportVideo}

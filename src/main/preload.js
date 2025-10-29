@@ -44,7 +44,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onExportError: (callback) => {
     ipcRenderer.on('export-error', (event, data) => callback(event, data));
     return () => ipcRenderer.removeAllListeners('export-error');
-  }
+  },
+  
+  // Save project
+  saveProject: (data) => ipcRenderer.invoke('save-project', data),
+  
+  // Load project
+  loadProject: () => ipcRenderer.invoke('load-project')
 });
 
 
