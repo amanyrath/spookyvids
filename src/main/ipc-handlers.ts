@@ -5,6 +5,7 @@ import ffmpeg, { FfmpegCommand } from 'fluent-ffmpeg';
 import OpenAI from 'openai';
 import { getAIAgent, TimelineClip } from './ai-agent';
 import { getImageService } from './image-service';
+import { getSettings } from './settings';
 
 // Set ffmpeg path - use bundled ffmpeg if available, otherwise use system ffmpeg
 const possiblePaths = [
@@ -1288,10 +1289,11 @@ export function setupIpcHandlers() {
     try {
       console.log('Transcribing video:', filePath);
       
-      // Check if OpenAI API key is available
-      const apiKey = process.env.OPENAI_API_KEY;
+      // Check if OpenAI API key is available (from settings or env)
+      const settings = getSettings();
+      const apiKey = settings.getSetting('openaiApiKey') || process.env.OPENAI_API_KEY;
       if (!apiKey) {
-        throw new Error('OPENAI_API_KEY environment variable is not set');
+        throw new Error('OpenAI API key not configured. Please set it in the Agent settings.');
       }
       
       const openai = new OpenAI({ apiKey });
@@ -1520,6 +1522,63 @@ export function setupIpcHandlers() {
     }
   });
   
+  // Get API settings
+  ipcMain.handle('ai-agent:get-settings', async () => {
+    try {
+      const settings = getSettings();
+      return {
+        success: true,
+        settings: {
+          hasOpenAIKey: !!settings.getSetting('openaiApiKey'),
+          hasPixabayKey: !!settings.getSetting('pixabayApiKey'),
+          // Don't return actual keys for security
+        },
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to get settings',
+      };
+    }
+  });
+
+  // Set API keys
+  ipcMain.handle('ai-agent:set-api-keys', async (event, data: { openaiApiKey?: string; pixabayApiKey?: string }) => {
+    try {
+      const settings = getSettings();
+      
+      if (data.openaiApiKey !== undefined) {
+        settings.setSetting('openaiApiKey', data.openaiApiKey);
+        // Update agent instance if it exists
+        try {
+          const agent = getAIAgent();
+          if (data.openaiApiKey) {
+            agent.updateApiKey(data.openaiApiKey);
+          }
+        } catch (error) {
+          // Agent might not be initialized yet, that's ok
+          console.log('Agent not initialized yet, will use key when created');
+        }
+      }
+      
+      if (data.pixabayApiKey !== undefined) {
+        settings.setSetting('pixabayApiKey', data.pixabayApiKey);
+        // Update image service instance
+        const imageService = getImageService();
+        if (data.pixabayApiKey) {
+          imageService.updateApiKey(data.pixabayApiKey);
+        }
+      }
+      
+      return { success: true };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to set API keys',
+      };
+    }
+  });
+
   // Get image cache stats
   ipcMain.handle('ai-agent:get-cache-stats', async () => {
     try {

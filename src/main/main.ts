@@ -4,14 +4,29 @@ import { setupIpcHandlers, setMainWindow } from './ipc-handlers';
 
 // Load environment variables from .env file
 import * as dotenv from 'dotenv';
-dotenv.config();
+import * as fs from 'fs';
+
+// Load .env file only in development mode (optional - users can also enter keys in UI)
+// In packaged mode, users enter keys through the UI and they're stored in userData/settings.json
+const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
+
+if (isDev) {
+  // Development: load .env from project root if it exists (optional)
+  const envPath = path.join(__dirname, '../..', '.env');
+  if (fs.existsSync(envPath)) {
+    dotenv.config({ path: envPath });
+    console.log('Loaded environment variables from .env (dev mode):', envPath);
+  } else {
+    console.log('No .env file found in dev mode - use UI to enter keys or create .env');
+  }
+}
 
 let mainWindow: BrowserWindow;
 
 function createWindow() {
   // Get the correct path for preload script
-  const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
-  const preloadPath = isDev 
+  const isDevMode = process.env.NODE_ENV === 'development' || !app.isPackaged;
+  const preloadPath = isDevMode 
     ? path.join(__dirname, 'preload.js')
     : path.join(process.resourcesPath, 'app.asar', 'dist', 'preload.js');
 

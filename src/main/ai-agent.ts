@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { getImageService, SpookyImage } from './image-service';
+import { getSettings } from './settings';
 
 export interface TimelineClip {
   id: string;
@@ -50,13 +51,19 @@ export class AIAgent {
   private conversationHistory: AgentMessage[] = [];
   private timelineClips: TimelineClip[] = [];
 
-  constructor() {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      throw new Error('OPENAI_API_KEY environment variable is not set');
+  constructor(apiKey?: string) {
+    // Get API key from parameter, settings, or environment (env for dev, settings for packaged)
+    const settings = getSettings();
+    const key = apiKey || settings.getSetting('openaiApiKey') || process.env.OPENAI_API_KEY;
+    
+    if (!key) {
+      // Don't throw error - allow lazy initialization when user enters key
+      // Store undefined for now, will be set via updateApiKey
+      this.openai = null as any; // Will be initialized when key is provided
+    } else {
+      this.openai = new OpenAI({ apiKey: key });
     }
-
-    this.openai = new OpenAI({ apiKey });
+    
     this.imageService = getImageService();
 
     // Initialize with system prompt
@@ -64,6 +71,24 @@ export class AIAgent {
       role: 'system',
       content: this.getSystemPrompt(),
     });
+  }
+
+  /**
+   * Update OpenAI API key (for dynamic configuration)
+   */
+  updateApiKey(apiKey: string): void {
+    if (!apiKey) {
+      throw new Error('API key cannot be empty');
+    }
+    this.openai = new OpenAI({ apiKey });
+    getSettings().setSetting('openaiApiKey', apiKey);
+  }
+
+  /**
+   * Check if API key is configured
+   */
+  hasApiKey(): boolean {
+    return this.openai !== null && this.openai !== undefined;
   }
 
   /**
@@ -110,6 +135,14 @@ export class AIAgent {
     userMessage: string,
     responseCallback: (response: AgentResponse) => void
   ): Promise<void> {
+    // Check if API key is configured
+    if (!this.hasApiKey()) {
+      responseCallback({
+        type: 'error',
+        content: 'OpenAI API key not configured. Please enter your API key in the Agent settings.',
+      });
+      return;
+    }
     try {
       // Add user message to history
       this.conversationHistory.push({

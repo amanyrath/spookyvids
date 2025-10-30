@@ -77,6 +77,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     clearHistory: () => ipcRenderer.invoke('ai-agent:clear-history'),
     getCacheStats: () => ipcRenderer.invoke('ai-agent:get-cache-stats'),
     clearCache: () => ipcRenderer.invoke('ai-agent:clear-cache'),
+    getSettings: () => ipcRenderer.invoke('ai-agent:get-settings'),
+    setApiKeys: (keys) => ipcRenderer.invoke('ai-agent:set-api-keys', keys),
   },
   
   // Listen for AI agent responses

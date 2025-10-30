@@ -32,10 +32,36 @@ function AgentPanel({
   ]);
   const [inputValue, setInputValue] = useState('');
   const [localProcessing, setLocalProcessing] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [apiKeys, setApiKeys] = useState({ openai: '', pixabay: '' });
+  const [hasKeys, setHasKeys] = useState({ openai: false, pixabay: false });
+  const [savingKeys, setSavingKeys] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const prevMessagesLengthRef = useRef<number>(0);
   const isInitialMountRef = useRef<boolean>(true);
+
+  // Check API key status on mount
+  useEffect(() => {
+    if (!window.electronAPI || !(window.electronAPI as any).aiAgent) return;
+    
+    const checkSettings = async () => {
+      try {
+        const result = await (window.electronAPI as any).aiAgent.getSettings();
+        if (result.success) {
+          setHasKeys({
+            openai: result.settings.hasOpenAIKey,
+            pixabay: result.settings.hasPixabayKey,
+          });
+          setShowSettings(!result.settings.hasOpenAIKey || !result.settings.hasPixabayKey);
+        }
+      } catch (error) {
+        console.error('Error checking settings:', error);
+      }
+    };
+    
+    checkSettings();
+  }, []);
 
   // Auto-scroll to bottom when messages update (only when new messages are added, not on initial mount)
   useEffect(() => {
@@ -166,6 +192,40 @@ function AgentPanel({
     { text: 'Make it more frightful', type: null },
   ];
 
+  const handleSaveKeys = async () => {
+    if (!window.electronAPI || !(window.electronAPI as any).aiAgent) return;
+    
+    setSavingKeys(true);
+    try {
+      const result = await (window.electronAPI as any).aiAgent.setApiKeys({
+        openaiApiKey: apiKeys.openai.trim() || undefined,
+        pixabayApiKey: apiKeys.pixabay.trim() || undefined,
+      });
+      
+      if (result.success) {
+        setHasKeys({
+          openai: !!apiKeys.openai.trim(),
+          pixabay: !!apiKeys.pixabay.trim(),
+        });
+        setShowSettings(false);
+        // Update welcome message
+        setMessages([{
+          id: 'welcome',
+          role: 'assistant',
+          content: 'Perfect! Your API keys are configured. I\'m ready to help you create frightful videos. What spooky effects would you like to add?',
+          timestamp: Date.now(),
+        }]);
+      } else {
+        alert(`Failed to save API keys: ${result.error || 'Unknown error'}`);
+      }
+    } catch (error: any) {
+      console.error('Error saving API keys:', error);
+      alert(`Error saving API keys: ${error.message || 'Unknown error'}`);
+    } finally {
+      setSavingKeys(false);
+    }
+  };
+
   const handleQuickSuggestion = async (suggestion: { text: string; type: string | null }) => {
     // For asset-related suggestions, send a message that prioritizes existing assets
     if (suggestion.type && onSendMessage) {
@@ -202,8 +262,96 @@ function AgentPanel({
     inputRef.current?.focus();
   };
 
+  // Show settings form if keys are missing
+  if (showSettings) {
+    return (
+      <div className="flex flex-col h-full bg-[#1a1a1a] overflow-hidden">
+        <div className="flex-1 overflow-y-auto p-4 min-h-0">
+          <div className="max-w-lg mx-auto">
+            <div className="bg-[#2a2a2a] rounded-lg p-6 border border-[#3a3a3a]">
+              <div className="flex items-center gap-2 mb-4">
+                <svg className="w-6 h-6 text-purple-400" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                </svg>
+                <h2 className="text-xl font-semibold text-white">Configure API Keys</h2>
+              </div>
+              
+              <p className="text-sm text-gray-400 mb-6">
+                To use the AI agent, you need to provide API keys for OpenAI and Pixabay. 
+                These keys are stored locally on your device and never shared.
+              </p>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">
+                    OpenAI API Key {hasKeys.openai && <span className="text-green-400">✓</span>}
+                  </label>
+                  <input
+                    type="password"
+                    value={apiKeys.openai}
+                    onChange={(e) => setApiKeys({ ...apiKeys, openai: e.target.value })}
+                    placeholder="sk-..."
+                    className="w-full bg-[#1a1a1a] border border-[#3a3a3a] rounded px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-purple-600"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Get your key from <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-purple-400 hover:underline">platform.openai.com</a>
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-2">
+                    Pixabay API Key {hasKeys.pixabay && <span className="text-green-400">✓</span>}
+                  </label>
+                  <input
+                    type="password"
+                    value={apiKeys.pixabay}
+                    onChange={(e) => setApiKeys({ ...apiKeys, pixabay: e.target.value })}
+                    placeholder="Pixabay API key"
+                    className="w-full bg-[#1a1a1a] border border-[#3a3a3a] rounded px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-purple-600"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Get your key from <a href="https://pixabay.com/api/docs/" target="_blank" rel="noopener noreferrer" className="text-purple-400 hover:underline">pixabay.com/api/docs</a>
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex gap-3 mt-6">
+                <button
+                  onClick={handleSaveKeys}
+                  disabled={savingKeys || (!apiKeys.openai.trim() && !hasKeys.openai) || (!apiKeys.pixabay.trim() && !hasKeys.pixabay)}
+                  className="flex-1 px-4 py-2 bg-purple-900 hover:bg-purple-800 rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {savingKeys ? 'Saving...' : 'Save & Continue'}
+                </button>
+                {(hasKeys.openai || hasKeys.pixabay) && (
+                  <button
+                    onClick={() => setShowSettings(false)}
+                    className="px-4 py-2 bg-[#3a3a3a] hover:bg-[#4a4a4a] rounded text-sm font-medium transition-colors"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col h-full bg-[#1a1a1a] overflow-hidden">
+      {/* Settings Button */}
+      <div className="flex justify-end px-4 pt-2 pb-1 flex-shrink-0">
+        <button
+          onClick={() => setShowSettings(true)}
+          className="text-xs text-gray-400 hover:text-white transition-colors"
+          title="Configure API Keys"
+        >
+          ⚙️ Settings
+        </button>
+      </div>
+
       {/* Chat Messages */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
         {messages.map((message) => (

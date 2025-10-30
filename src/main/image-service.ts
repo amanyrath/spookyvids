@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as https from 'https';
 import * as http from 'http';
+import { getSettings } from './settings';
 
 export interface SpookyImage {
   id: string;
@@ -29,7 +30,9 @@ export class ImageService {
   private downloadedImages: Map<string, string> = new Map();
 
   constructor() {
-    this.apiKey = process.env.PIXABAY_API_KEY || '';
+    // Get API key from settings or environment (env for dev, settings for packaged)
+    const settings = getSettings();
+    this.apiKey = settings.getSetting('pixabayApiKey') || process.env.PIXABAY_API_KEY || '';
     // Use assets folder in user data directory with organized subdirectories
     this.cacheDir = path.join(app.getPath('userData'), 'assets');
     
@@ -60,6 +63,14 @@ export class ImageService {
     }
   }
   
+  /**
+   * Update Pixabay API key (for dynamic configuration)
+   */
+  updateApiKey(apiKey: string): void {
+    this.apiKey = apiKey;
+    getSettings().setSetting('pixabayApiKey', apiKey);
+  }
+
   /**
    * Get the assets directory for a specific type (ghost, monster, tombstone)
    */
