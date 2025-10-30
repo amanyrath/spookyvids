@@ -43,3 +43,8 @@ process-docs/
 
 .env
 
+# Large asset files (keep folder structure, but ignore large files)
+assets/**/*.gif
+assets/**/*.mp4
+assets/**/*.mov
+
