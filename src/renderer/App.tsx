@@ -12,7 +12,7 @@ declare global {
       getFilePath: (file: File) => string;
       onFileValidated: (callback: (event: any, data: any) => void) => (() => void);
       onFileError: (callback: (event: any, error: any) => void) => (() => void);
-      exportVideo: (data: { clips: Array<{ filePath: string; inTime: number; outTime: number; track?: number; overlayPosition?: any; overlaySize?: any; overlayVisible?: boolean; muted?: boolean }>; outputPath?: string; overlayVisible?: boolean; track0Muted?: boolean; track1Muted?: boolean }) => Promise<any>;
+      exportVideo: (data: { clips: Array<{ filePath: string; inTime: number; outTime: number; track?: number; overlayPosition?: any; overlaySize?: any; overlayVisible?: boolean; muted?: boolean }>; outputPath?: string; overlayVisible?: boolean; track0Muted?: boolean; track1Muted?: boolean; resolution?: '720p' | '1080p' | 'original' }) => Promise<any>;
       onExportProgress: (callback: (event: any, data: any) => void) => (() => void);
       onExportComplete: (callback: (event: any, data: any) => void) => (() => void);
       onExportError: (callback: (event: any, data: any) => void) => (() => void);
@@ -94,10 +94,12 @@ function App() {
   const [exportProgress, setExportProgress] = useState<number>(0);
   const [exportError, setExportError] = useState<string | null>(null);
   const [exportSuccess, setExportSuccess] = useState<string | null>(null);
+  const [exportResolution, setExportResolution] = useState<'720p' | '1080p' | 'original'>('1080p');
 
   // Recording state
   const [isRecording, setIsRecording] = useState<boolean>(false);
   const [recordingTime, setRecordingTime] = useState<number>(0);
+  const [isProcessingRecording, setIsProcessingRecording] = useState<boolean>(false);
   const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
   const [recordedChunks, setRecordedChunks] = useState<Blob[]>([]);
   const [showSourceSelector, setShowSourceSelector] = useState<boolean>(false);
@@ -445,17 +447,36 @@ function App() {
     let splitClipIndex = -1;
     let splitTime = 0; // Time within the source clip
     
-    for (let i = 0; i < timelineClips.length; i++) {
-      const clip = timelineClips[i];
-      const clipStart = clip.startTime;
-      const clipEnd = clip.startTime + (clip.outTime - clip.inTime);
-      
-      if (playheadTime >= clipStart && playheadTime < clipEnd) {
-        splitClipIndex = i;
-        // Calculate the time within the source video at this position
-        const offsetFromClipStart = playheadTime - clipStart;
-        splitTime = clip.inTime + offsetFromClipStart;
-        break;
+    // Prioritize the focused clip if it exists and playhead is over it
+    if (focusedClipId) {
+      const focusedClip = timelineClips.find(c => c.id === focusedClipId);
+      if (focusedClip) {
+        const clipStart = focusedClip.startTime;
+        const clipEnd = focusedClip.startTime + (focusedClip.outTime - focusedClip.inTime);
+        
+        if (playheadTime >= clipStart && playheadTime < clipEnd) {
+          splitClipIndex = timelineClips.indexOf(focusedClip);
+          // Calculate the time within the source video at this position
+          const offsetFromClipStart = playheadTime - clipStart;
+          splitTime = focusedClip.inTime + offsetFromClipStart;
+        }
+      }
+    }
+    
+    // If no focused clip is at playhead, find any clip the playhead is over
+    if (splitClipIndex === -1) {
+      for (let i = 0; i < timelineClips.length; i++) {
+        const clip = timelineClips[i];
+        const clipStart = clip.startTime;
+        const clipEnd = clip.startTime + (clip.outTime - clip.inTime);
+        
+        if (playheadTime >= clipStart && playheadTime < clipEnd) {
+          splitClipIndex = i;
+          // Calculate the time within the source video at this position
+          const offsetFromClipStart = playheadTime - clipStart;
+          splitTime = clip.inTime + offsetFromClipStart;
+          break;
+        }
       }
     }
     
@@ -720,6 +741,7 @@ function App() {
         }
         
         setIsRecording(false);
+        setIsProcessingRecording(false);
         setRecordingTime(0);
         setRecordingType(null);
       };
@@ -883,6 +905,7 @@ function App() {
         }
         
         setIsRecording(false);
+        setIsProcessingRecording(false);
         setRecordingTime(0);
       };
 
@@ -1048,7 +1071,9 @@ function App() {
       });
 
       if (!overlayResult.success) {
-        throw new Error('Failed to create webcam overlay window');
+        const errorMsg = overlayResult.error || 'Unknown error';
+        console.error('Overlay creation failed:', errorMsg);
+        throw new Error('Failed to create webcam overlay window: ' + errorMsg);
       }
 
       // Get microphone audio stream (if not already obtained)
@@ -1155,6 +1180,7 @@ function App() {
         setShowDesktopWebcamPreview(false);
         
         setIsRecording(false);
+        setIsProcessingRecording(false);
         setRecordingTime(0);
         setRecordingType(null);
         
@@ -1189,6 +1215,10 @@ function App() {
   };
 
   const handleStopRecording = async () => {
+    // Immediately stop recording state to stop the counter
+    setIsRecording(false);
+    setIsProcessingRecording(true);
+    
     if (mediaRecorder && mediaRecorder.state === 'recording') {
       mediaRecorder.stop();
     }
@@ -1509,7 +1539,8 @@ function App() {
         clips: clips,
         overlayVisible: overlayVisible,
         track0Muted: track0Muted,
-        track1Muted: track1Muted
+        track1Muted: track1Muted,
+        resolution: exportResolution
       });
 
       if (result.canceled) {
@@ -1719,26 +1750,32 @@ function App() {
         
         // Check if there are actions to apply
         if (response.data) {
-          // Handle overlay additions
-          if (response.data.overlays && response.data.clipId) {
+          // Handle overlay additions (can be array or single overlay)
+          if ((response.data.overlays || response.data.overlay) && response.data.clipId) {
             const clipId = response.data.clipId;
-            const newOverlays = response.data.overlays;
+            const newOverlays = response.data.overlays || [response.data.overlay];
+            
+            console.log(`[Agent Response] Adding overlay to clip ${clipId}:`, newOverlays);
             
             // Apply overlays to the clip
             setTimelineClips(prev => {
-              return prev.map(clip => {
+              const updated = prev.map(clip => {
                 if (clip.id === clipId) {
                   const existingOverlays = clip.overlayEffects || [];
+                  const updatedOverlays = [...existingOverlays, ...newOverlays];
+                  console.log(`[Agent Response] Clip ${clipId} now has ${updatedOverlays.length} overlay(s)`);
                   return {
                     ...clip,
-                    overlayEffects: [...existingOverlays, ...newOverlays],
+                    overlayEffects: updatedOverlays,
                   };
                 }
                 return clip;
               });
+              console.log(`[Agent Response] Updated timeline with ${updated.length} clip(s)`);
+              return updated;
             });
             
-            console.log(`Added ${newOverlays.length} overlays to clip ${clipId}`);
+            console.log(`Added ${newOverlays.length} overlay(s) to clip ${clipId}`);
           }
           
           // Handle filter application
@@ -2007,8 +2044,8 @@ function App() {
 
   return (
     <div className="h-screen flex flex-col bg-[#1a1a1a] text-white overflow-hidden">
-      {/* Top Toolbar */}
-      <div className="h-12 bg-[#252525] border-b border-[#3a3a3a] flex items-center justify-between px-6">
+      {/* Top Toolbar - Fixed at top */}
+      <div className="h-12 bg-[#252525] border-b border-[#3a3a3a] flex items-center justify-between px-6 flex-shrink-0 z-50 sticky top-0">
         <h1 className="text-lg font-semibold">Spooky Clips</h1>
         <div className="flex items-center gap-3">
           {exportSuccess && (
@@ -2060,10 +2097,12 @@ function App() {
           <div className="relative">
             <button 
               onClick={isRecording ? handleStopRecording : () => setShowRecordingMenu(!showRecordingMenu)}
-              disabled={isExporting}
+              disabled={isExporting || isProcessingRecording}
               className={`p-2 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 ${
                 isRecording 
                   ? 'bg-red-600 hover:bg-red-700' 
+                  : isProcessingRecording
+                  ? 'bg-[#3a3a3a]'
                   : 'bg-[#3a3a3a] hover:bg-[#4a4a4a]'
               }`}
             >
@@ -2072,6 +2111,8 @@ function App() {
                   <span className="inline-block w-2 h-2 bg-white rounded-full animate-pulse"></span>
                   <span className="text-xs">{Math.floor(recordingTime / 60)}:{String(recordingTime % 60).padStart(2, '0')}</span>
                 </span>
+              ) : isProcessingRecording ? (
+                <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
               ) : (
                 <>
                   {/* Record Icon - Filled circle (record symbol) */}
@@ -2086,7 +2127,7 @@ function App() {
             </button>
           
           {/* Dropdown Menu */}
-          {showRecordingMenu && !isRecording && (
+          {showRecordingMenu && !isRecording && !isProcessingRecording && (
             <div className="absolute right-0 mt-2 w-48 bg-[#2a2a2a] border border-[#3a3a3a] rounded-lg shadow-lg z-50">
               <button
                 onClick={handleRecordDesktop}
@@ -2119,20 +2160,32 @@ function App() {
             </div>
           )}
         </div>
-          <button 
-            onClick={handleExportVideo}
-            disabled={isExporting || isRecording || timelineClips.length === 0}
-            className="px-4 py-2 bg-purple-900 hover:bg-purple-800 rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed relative min-w-[100px]"
-          >
-            {isExporting ? (
-              <span className="flex items-center gap-2 justify-center">
-                <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
-                <span>{Math.round(exportProgress)}%</span>
-              </span>
-            ) : (
-              'Export'
-            )}
-          </button>
+          <div className="flex items-center gap-2">
+            <select
+              value={exportResolution}
+              onChange={(e) => setExportResolution(e.target.value as '720p' | '1080p' | 'original')}
+              disabled={isExporting || isRecording || timelineClips.length === 0}
+              className="px-3 py-2 bg-[#3a3a3a] hover:bg-[#4a4a4a] rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-white border border-[#4a4a4a]"
+            >
+              <option value="720p">720p</option>
+              <option value="1080p">1080p</option>
+              <option value="original">Original</option>
+            </select>
+            <button 
+              onClick={handleExportVideo}
+              disabled={isExporting || isRecording || timelineClips.length === 0}
+              className="px-4 py-2 bg-purple-900 hover:bg-purple-800 rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed relative min-w-[100px]"
+            >
+              {isExporting ? (
+                <span className="flex items-center gap-2 justify-center">
+                  <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                  <span>{Math.round(exportProgress)}%</span>
+                </span>
+              ) : (
+                'Export'
+              )}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -2448,7 +2501,7 @@ function App() {
       {/* Main Content Area */}
       <div className="flex-1 flex overflow-hidden">
         {/* Media Library */}
-        <div className="w-64 bg-[#212121] border-r border-[#3a3a3a] overflow-y-auto">
+        <div className="w-72 bg-[#212121] border-r border-[#3a3a3a] flex flex-col">
           <ImportArea 
             onFileLoaded={handleFileLoaded} 
             onImportClick={handleImportVideo}

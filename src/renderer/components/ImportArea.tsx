@@ -231,9 +231,9 @@ function ImportArea({
   };
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Tabs Header */}
-      <div className="px-4 py-3 border-b border-[#3a3a3a] flex items-center gap-1">
+    <div className="flex flex-col h-full overflow-hidden">
+      {/* Tabs Header - Sticky at top */}
+      <div className="px-4 py-3 border-b border-[#3a3a3a] flex items-center gap-1 flex-shrink-0 bg-[#212121] z-10 sticky top-0">
         <button
           onClick={() => onTabChange?.('library')}
           className={`px-3 py-1.5 text-xs font-semibold rounded transition-colors ${
@@ -280,7 +280,7 @@ function ImportArea({
       {activeTab === 'library' ? (
         <>
           {/* Media Browser */}
-          <div className="flex-1 p-3 overflow-y-auto">
+          <div className="flex-1 p-3 overflow-y-auto min-h-0">
             {/* Empty State - Drag and Drop */}
             <div className="space-y-2">
               {/* Display multiple clips */}
@@ -351,20 +351,24 @@ function ImportArea({
           </div>
         </>
       ) : activeTab === 'transcript' ? (
-        <TranscriptionPanel
-          transcript={transcript}
-          isGenerating={transcriptionStatus === 'generating'}
-          error={transcriptionError}
-          onGenerate={onGenerateTranscript}
-          onWordClick={onTranscriptWordClick}
-        />
+        <div className="flex-1 min-h-0">
+          <TranscriptionPanel
+            transcript={transcript}
+            isGenerating={transcriptionStatus === 'generating'}
+            error={transcriptionError}
+            onGenerate={onGenerateTranscript}
+            onWordClick={onTranscriptWordClick}
+          />
+        </div>
       ) : activeTab === 'agent' ? (
-        <AgentPanel
-          onSendMessage={onAgentSendMessage}
-          isProcessing={isAgentProcessing}
-        />
+        <div className="flex-1 min-h-0 overflow-hidden">
+          <AgentPanel
+            onSendMessage={onAgentSendMessage}
+            isProcessing={isAgentProcessing}
+          />
+        </div>
       ) : (
-        <div className="flex-1 p-4 overflow-y-auto">
+        <div className="flex-1 p-4 overflow-y-auto min-h-0">
           {focusedClipId ? (
             <EffectsPanel
               clipId={focusedClipId}

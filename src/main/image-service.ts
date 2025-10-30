@@ -24,19 +24,55 @@ export interface ImageSearchResult {
  */
 export class ImageService {
   private apiKey: string;
-  private cacheDir: string;
+  private cacheDir: string; // Base assets directory in userData
+  private projectAssetsDir: string | null = null; // Project assets directory (if exists)
   private downloadedImages: Map<string, string> = new Map();
 
   constructor() {
     this.apiKey = process.env.PIXABAY_API_KEY || '';
-    this.cacheDir = path.join(app.getPath('userData'), 'spooky-cache');
+    // Use assets folder in user data directory with organized subdirectories
+    this.cacheDir = path.join(app.getPath('userData'), 'assets');
     
-    // Ensure cache directory exists
+    // Try to find project assets folder (relative to app path or process.cwd)
+    const possibleProjectDirs = [
+      process.cwd(), // Development mode
+      path.join(__dirname, '../..'), // Built app
+      path.join(process.resourcesPath || '', 'app'), // Packaged app
+    ];
+    
+    for (const baseDir of possibleProjectDirs) {
+      const projectAssetsPath = path.join(baseDir, 'assets');
+      if (fs.existsSync(projectAssetsPath)) {
+        this.projectAssetsDir = projectAssetsPath;
+        console.log('Found project assets directory:', projectAssetsPath);
+        break;
+      }
+    }
+    
+    // Ensure base assets directory exists
     if (!fs.existsSync(this.cacheDir)) {
       fs.mkdirSync(this.cacheDir, { recursive: true });
     }
     
-    console.log('ImageService initialized, cache dir:', this.cacheDir);
+    console.log('ImageService initialized, userData assets dir:', this.cacheDir);
+    if (this.projectAssetsDir) {
+      console.log('ImageService will also check project assets dir:', this.projectAssetsDir);
+    }
+  }
+  
+  /**
+   * Get the assets directory for a specific type (ghost, monster, tombstone)
+   */
+  private getTypeDir(type: 'ghost' | 'monster' | 'tombstone', useProjectDir: boolean = false): string {
+    const baseDir = useProjectDir && this.projectAssetsDir ? this.projectAssetsDir : this.cacheDir;
+    const typeDir = path.join(baseDir, type);
+    
+    // Ensure type directory exists
+    if (!fs.existsSync(typeDir)) {
+      fs.mkdirSync(typeDir, { recursive: true });
+    }
+    
+    return typeDir;
   }
 
   /**
@@ -87,7 +123,7 @@ export class ImageService {
   /**
    * Download an image to local cache
    */
-  async downloadImage(imageUrl: string, filename: string): Promise<string> {
+  async downloadImage(imageUrl: string, filename: string, type?: 'ghost' | 'monster' | 'tombstone'): Promise<string> {
     // Check if already downloaded
     if (this.downloadedImages.has(imageUrl)) {
       const cachedPath = this.downloadedImages.get(imageUrl)!;
@@ -100,7 +136,10 @@ export class ImageService {
     try {
       const ext = path.extname(new URL(imageUrl).pathname) || '.png';
       const sanitizedFilename = filename.replace(/[^a-z0-9]/gi, '_').toLowerCase();
-      const localPath = path.join(this.cacheDir, `${sanitizedFilename}${ext}`);
+      
+      // Save to organized subdirectory by type if type is provided
+      const targetDir = type ? this.getTypeDir(type, false) : this.cacheDir;
+      const localPath = path.join(targetDir, `${sanitizedFilename}${ext}`);
 
       console.log('Downloading image from:', imageUrl);
       console.log('Saving to:', localPath);
@@ -137,23 +176,44 @@ export class ImageService {
       const urlObj = new URL(url);
       const protocol = urlObj.protocol === 'https:' ? https : http;
 
-      protocol.get(url, (res) => {
+      const timeout = setTimeout(() => {
+        reject(new Error('Request timeout after 10 seconds'));
+      }, 10000); // 10 second timeout
+
+      const req = protocol.get(url, (res) => {
         let data = '';
+
+        // Check for error status codes
+        if (res.statusCode && res.statusCode !== 200) {
+          clearTimeout(timeout);
+          reject(new Error(`HTTP ${res.statusCode}: ${res.statusMessage || 'Unknown error'}`));
+          return;
+        }
 
         res.on('data', (chunk) => {
           data += chunk;
         });
 
         res.on('end', () => {
+          clearTimeout(timeout);
           try {
             const json = JSON.parse(data);
             resolve(json);
-          } catch (error) {
-            reject(error);
+          } catch (error: any) {
+            reject(new Error(`Failed to parse JSON: ${error.message}`));
           }
         });
-      }).on('error', (error) => {
+      });
+
+      req.on('error', (error) => {
+        clearTimeout(timeout);
         reject(error);
+      });
+
+      req.setTimeout(10000, () => {
+        req.destroy();
+        clearTimeout(timeout);
+        reject(new Error('Request timeout'));
       });
     });
   }
@@ -193,7 +253,129 @@ export class ImageService {
   }
 
   /**
-   * Clear the image cache
+   * List all assets in the assets folder, organized by type
+   */
+  listAssets(type?: 'ghost' | 'monster' | 'tombstone'): Array<{ filename: string; path: string; size: number; modified: Date; type: 'ghost' | 'monster' | 'tombstone' }> {
+    const assets: Array<{ filename: string; path: string; size: number; modified: Date; type: 'ghost' | 'monster' | 'tombstone' }> = [];
+    
+    const typesToCheck: Array<'ghost' | 'monster' | 'tombstone'> = type ? [type] : ['ghost', 'monster', 'tombstone'];
+    
+    for (const assetType of typesToCheck) {
+      // Check project assets folder first (manually placed assets)
+      if (this.projectAssetsDir) {
+        const projectTypeDir = path.join(this.projectAssetsDir, assetType);
+        if (fs.existsSync(projectTypeDir)) {
+          try {
+            const files = fs.readdirSync(projectTypeDir);
+            for (const file of files) {
+              const ext = path.extname(file).toLowerCase();
+              if (['.png', '.jpg', '.jpeg', '.gif', '.webp'].includes(ext)) {
+                const filePath = path.join(projectTypeDir, file);
+                const stats = fs.statSync(filePath);
+                assets.push({
+                  filename: file,
+                  path: filePath,
+                  size: stats.size,
+                  modified: stats.mtime,
+                  type: assetType,
+                });
+              }
+            }
+          } catch (error) {
+            console.error(`Error reading project ${assetType} directory:`, error);
+          }
+        }
+      }
+      
+      // Check userData assets folder (downloaded assets)
+      const userDataTypeDir = path.join(this.cacheDir, assetType);
+      if (fs.existsSync(userDataTypeDir)) {
+        try {
+          const files = fs.readdirSync(userDataTypeDir);
+          for (const file of files) {
+            const ext = path.extname(file).toLowerCase();
+            if (['.png', '.jpg', '.jpeg', '.gif', '.webp'].includes(ext)) {
+              const filePath = path.join(userDataTypeDir, file);
+              const stats = fs.statSync(filePath);
+              assets.push({
+                filename: file,
+                path: filePath,
+                size: stats.size,
+                modified: stats.mtime,
+                type: assetType,
+              });
+            }
+          }
+        } catch (error) {
+          console.error(`Error reading userData ${assetType} directory:`, error);
+        }
+      }
+    }
+    
+    // Sort by modified date (most recent first)
+    return assets.sort((a, b) => b.modified.getTime() - a.modified.getTime());
+  }
+
+  /**
+   * Get asset by filename and type
+   */
+  getAsset(filename: string, type?: 'ghost' | 'monster' | 'tombstone'): string | null {
+    try {
+      // If type is provided, check organized subdirectories
+      if (type) {
+        // Check project assets first
+        if (this.projectAssetsDir) {
+          const projectTypeDir = path.join(this.projectAssetsDir, type);
+          const projectPath = path.join(projectTypeDir, filename);
+          if (fs.existsSync(projectPath)) {
+            return projectPath;
+          }
+        }
+        
+        // Check userData assets
+        const userDataTypeDir = path.join(this.cacheDir, type);
+        const userDataPath = path.join(userDataTypeDir, filename);
+        if (fs.existsSync(userDataPath)) {
+          return userDataPath;
+        }
+      } else {
+        // Legacy: search all type directories
+        // Check project assets folder
+        if (this.projectAssetsDir) {
+          for (const assetType of ['ghost', 'monster', 'tombstone'] as const) {
+            const projectTypeDir = path.join(this.projectAssetsDir, assetType);
+            const projectPath = path.join(projectTypeDir, filename);
+            if (fs.existsSync(projectPath)) {
+              return projectPath;
+            }
+          }
+        }
+        
+        // Check userData assets folder
+        for (const assetType of ['ghost', 'monster', 'tombstone'] as const) {
+          const userDataTypeDir = path.join(this.cacheDir, assetType);
+          const userDataPath = path.join(userDataTypeDir, filename);
+          if (fs.existsSync(userDataPath)) {
+            return userDataPath;
+          }
+        }
+        
+        // Fallback to flat structure (legacy)
+        const flatPath = path.join(this.cacheDir, filename);
+        if (fs.existsSync(flatPath)) {
+          return flatPath;
+        }
+      }
+      
+      return null;
+    } catch (error) {
+      console.error('Error getting asset:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Clear the assets folder
    */
   clearCache(): void {
     try {
@@ -202,14 +384,14 @@ export class ImageService {
         fs.unlinkSync(path.join(this.cacheDir, file));
       }
       this.downloadedImages.clear();
-      console.log('Image cache cleared');
+      console.log('Assets folder cleared');
     } catch (error) {
-      console.error('Error clearing cache:', error);
+      console.error('Error clearing assets:', error);
     }
   }
 
   /**
-   * Get cache statistics
+   * Get assets folder statistics
    */
   getCacheStats(): { count: number; sizeBytes: number } {
     try {
@@ -227,7 +409,7 @@ export class ImageService {
         sizeBytes: totalSize,
       };
     } catch (error) {
-      console.error('Error getting cache stats:', error);
+      console.error('Error getting assets stats:', error);
       return { count: 0, sizeBytes: 0 };
     }
   }

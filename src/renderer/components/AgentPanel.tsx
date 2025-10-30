@@ -34,10 +34,23 @@ function AgentPanel({
   const [localProcessing, setLocalProcessing] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const prevMessagesLengthRef = useRef<number>(0);
+  const isInitialMountRef = useRef<boolean>(true);
 
-  // Auto-scroll to bottom when messages update
+  // Auto-scroll to bottom when messages update (only when new messages are added, not on initial mount)
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // Skip scroll on initial mount
+    if (isInitialMountRef.current) {
+      isInitialMountRef.current = false;
+      prevMessagesLengthRef.current = messages.length;
+      return;
+    }
+
+    // Only scroll if messages actually increased (new message added)
+    if (messages.length > prevMessagesLengthRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      prevMessagesLengthRef.current = messages.length;
+    }
   }, [messages]);
 
   // Listen for AI responses from main process
@@ -147,21 +160,52 @@ function AgentPanel({
   };
 
   const quickSuggestions = [
-    'Make this video scarier with ghosts',
-    'Add tombstones at the bottom',
-    'Add spooky monsters',
-    'Make it more frightful',
+    { text: 'Add ghosts', type: 'ghost' },
+    { text: 'Add tombstones', type: 'tombstone' },
+    { text: 'Add monsters', type: 'monster' },
+    { text: 'Make it more frightful', type: null },
   ];
 
-  const handleQuickSuggestion = (suggestion: string) => {
-    setInputValue(suggestion);
+  const handleQuickSuggestion = async (suggestion: { text: string; type: string | null }) => {
+    // For asset-related suggestions, send a message that prioritizes existing assets
+    if (suggestion.type && onSendMessage) {
+      try {
+        // Send message that instructs AI to check assets folder first
+        const message = `Use existing ${suggestion.type} assets from the assets folder. If none exist in the folder, search for and download one. Add the ${suggestion.type} to the first clip.`;
+        
+        // Add user message to chat immediately
+        const userMessage: Message = {
+          id: `msg-${Date.now()}-${Math.random()}`,
+          role: 'user',
+          content: message,
+          timestamp: Date.now(),
+        };
+        
+        setMessages(prev => [...prev, userMessage]);
+        setLocalProcessing(true);
+        
+        // Send to AI agent via App.tsx (which will include timeline clips)
+        await onSendMessage(message);
+        return;
+      } catch (error) {
+        console.error('Error with quick suggestion:', error);
+        setLocalProcessing(false);
+        // Fall through to regular input if API fails
+        setInputValue(suggestion.text);
+        inputRef.current?.focus();
+        return;
+      }
+    }
+    
+    // For non-asset suggestions, just set the input
+    setInputValue(suggestion.text);
     inputRef.current?.focus();
   };
 
   return (
-    <div className="flex flex-col h-full bg-[#1a1a1a]">
+    <div className="flex flex-col h-full bg-[#1a1a1a] overflow-hidden">
       {/* Chat Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
         {messages.map((message) => (
           <div
             key={message.id}
@@ -196,7 +240,7 @@ function AgentPanel({
 
       {/* Quick Suggestions - Show only if no messages from user yet */}
       {messages.filter(m => m.role === 'user').length === 0 && (
-        <div className="px-4 pb-2">
+        <div className="px-4 pb-2 flex-shrink-0">
           <p className="text-xs text-gray-500 mb-2">Try asking:</p>
           <div className="grid grid-cols-1 gap-2">
             {quickSuggestions.map((suggestion, index) => (
@@ -205,7 +249,7 @@ function AgentPanel({
                 onClick={() => handleQuickSuggestion(suggestion)}
                 className="text-left text-xs px-3 py-2 bg-[#2a2a2a] hover:bg-[#3a3a3a] rounded transition-colors text-gray-300"
               >
-                {suggestion}
+                {suggestion.text}
               </button>
             ))}
           </div>
@@ -213,7 +257,7 @@ function AgentPanel({
       )}
 
       {/* Input Area */}
-      <div className="border-t border-[#3a3a3a] p-4">
+      <div className="border-t border-[#3a3a3a] p-4 flex-shrink-0">
         <div className="flex gap-2">
           <textarea
             ref={inputRef}

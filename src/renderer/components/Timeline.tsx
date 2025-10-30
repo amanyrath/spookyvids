@@ -924,7 +924,7 @@ function Timeline({
             onDragOver={(e) => handleTrackDragOver(e, 0)}
             onDragLeave={handleTrackDragLeave}
           >
-            <div className="absolute left-2 top-1/2 transform -translate-y-1/2 text-xs text-gray-500 font-semibold z-10 flex items-center gap-2">
+            <div className="absolute left-2 top-1/2 transform -translate-y-1/2 text-xs text-gray-500 font-semibold z-10 flex items-center gap-2 pointer-events-none">
               <span>Main Track</span>
               {onTrack0MuteToggle && (
                 <button
@@ -932,7 +932,7 @@ function Timeline({
                     e.stopPropagation();
                     onTrack0MuteToggle();
                   }}
-                  className="p-1 hover:bg-[#3a3a3a] rounded transition-colors"
+                  className="p-1 hover:bg-[#3a3a3a] rounded transition-colors pointer-events-auto"
                   title={track0Muted ? "Unmute Main Track" : "Mute Main Track"}
                 >
                   {track0Muted ? (
@@ -1115,7 +1115,7 @@ function Timeline({
               onDragOver={(e) => handleTrackDragOver(e, 1)}
               onDragLeave={handleTrackDragLeave}
             >
-              <div className="absolute left-2 top-1/2 transform -translate-y-1/2 text-xs text-gray-500 font-semibold z-10 flex items-center gap-2">
+              <div className="absolute left-2 top-1/2 transform -translate-y-1/2 text-xs text-gray-500 font-semibold z-10 flex items-center gap-2 pointer-events-none">
                 <span>Overlay Track</span>
                 {onTrack1MuteToggle && (
                   <button
@@ -1123,7 +1123,7 @@ function Timeline({
                       e.stopPropagation();
                       onTrack1MuteToggle();
                     }}
-                    className="p-1 hover:bg-[#3a3a3a] rounded transition-colors"
+                    className="p-1 hover:bg-[#3a3a3a] rounded transition-colors pointer-events-auto"
                     title={track1Muted ? "Unmute Overlay Track" : "Mute Overlay Track"}
                   >
                     {track1Muted ? (
@@ -1144,7 +1144,7 @@ function Timeline({
                       e.stopPropagation();
                       onToggleOverlayTrack();
                     }}
-                    className="p-1 hover:bg-red-600/20 text-gray-400 hover:text-red-400 rounded transition-colors"
+                    className="p-1 hover:bg-red-600/20 text-gray-400 hover:text-red-400 rounded transition-colors pointer-events-auto"
                     title="Remove Overlay Track"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

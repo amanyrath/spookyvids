@@ -81,6 +81,35 @@ export class AIAgent {
     userMessage: string,
     responseCallback: (response: AgentResponse) => void
   ): Promise<void> {
+    // Create a promise that rejects after 100 seconds
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => {
+        reject(new Error('Agent request timed out after 100 seconds. Please try again with a simpler request.'));
+      }, 100000); // 100 seconds
+    });
+
+    try {
+      // Race between the actual processing and the timeout
+      await Promise.race([
+        this.processMessageInternal(userMessage, responseCallback),
+        timeoutPromise,
+      ]);
+    } catch (error: any) {
+      console.error('Error processing message:', error);
+      responseCallback({
+        type: 'error',
+        content: error.message || 'Failed to process message',
+      });
+    }
+  }
+
+  /**
+   * Internal message processing (without timeout wrapper)
+   */
+  private async processMessageInternal(
+    userMessage: string,
+    responseCallback: (response: AgentResponse) => void
+  ): Promise<void> {
     try {
       // Add user message to history
       this.conversationHistory.push({
@@ -105,61 +134,151 @@ export class AIAgent {
 
       const responseMessage = completion.choices[0].message;
 
-      // Handle function calls
-      if (responseMessage.function_call) {
-        const functionName = responseMessage.function_call.name;
-        const functionArgs = JSON.parse(responseMessage.function_call.arguments);
+      let maxIterations = 10; // Prevent infinite loops
+      let iteration = 0;
+      let finalFunctionResult: any = null;
 
-        responseCallback({
-          type: 'tool_call',
-          content: `Executing: ${this.getToolDescription(functionName, functionArgs)}`,
+      // Loop to handle multiple sequential function calls
+      while (iteration < maxIterations) {
+        iteration++;
+        
+        console.log(`[Loop] Starting iteration ${iteration} of max ${maxIterations}`);
+        
+        let currentCompletion;
+        if (iteration === 1) {
+          currentCompletion = completion;
+        } else {
+          try {
+            console.log(`[Iteration ${iteration}] Making OpenAI API call...`);
+            // Add timeout for subsequent calls to prevent hanging
+            const timeoutPromise = new Promise<never>((_, reject) => 
+              setTimeout(() => reject(new Error('OpenAI API call timeout after 30 seconds')), 30000)
+            );
+            
+            currentCompletion = await Promise.race([
+              this.openai.chat.completions.create({
+                model: 'gpt-4-turbo-preview',
+                messages: this.conversationHistory as any,
+                functions: this.getFunctions(),
+                function_call: 'auto',
+                temperature: 0.8,
+              }),
+              timeoutPromise,
+            ]);
+            console.log(`[Iteration ${iteration}] OpenAI API call completed`);
+          } catch (error: any) {
+            console.error(`[Iteration ${iteration}] OpenAI call failed:`, error.message);
+            // If API call fails after a function call, use the function result as final
+            if (finalFunctionResult && iteration > 1) {
+              const finalMessage = finalFunctionResult.success && finalFunctionResult.overlay
+                ? 'The ghost has been successfully summoned to the first clip. Spooky, isn\'t it?'
+                : finalFunctionResult.success && finalFunctionResult.overlays
+                ? `Successfully added ${finalFunctionResult.count || finalFunctionResult.overlays.length} spooky overlay(s)!`
+                : 'Operation completed.';
+              
+              console.log(`[Iteration ${iteration}] Using fallback completion due to API error`);
+              responseCallback({
+                type: 'message',
+                content: finalMessage,
+                data: finalFunctionResult,
+              });
+              return;
+            }
+            throw error;
+          }
+        }
+
+        const currentMessage = currentCompletion.choices[0].message;
+        
+        console.log(`[Iteration ${iteration}] Message received:`, {
+          hasFunctionCall: !!currentMessage.function_call,
+          hasContent: !!currentMessage.content,
+          content: currentMessage.content?.substring(0, 100),
         });
 
-        // Execute the function
-        const functionResult = await this.executeFunction(functionName, functionArgs);
+        // Handle function calls
+        if (currentMessage.function_call) {
+          const functionName = currentMessage.function_call!.name;
+          const functionArgs = JSON.parse(currentMessage.function_call!.arguments);
 
-        // Add function result to conversation
-        this.conversationHistory.push({
-          role: 'assistant',
-          content: responseMessage.content || '',
-        });
+          console.log(`Executing function (iteration ${iteration}): ${functionName}`, functionArgs);
+          responseCallback({
+            type: 'tool_call',
+            content: `Executing: ${this.getToolDescription(functionName, functionArgs)}`,
+          });
 
-        this.conversationHistory.push({
-          role: 'system',
-          content: `Function ${functionName} result: ${JSON.stringify(functionResult)}`,
-        });
+          // Execute the function
+          const functionResult = await this.executeFunction(functionName, functionArgs);
+          console.log(`Function ${functionName} result:`, JSON.stringify(functionResult, null, 2));
+          finalFunctionResult = functionResult; // Keep track of last result
 
-        // Get final response from AI
-        const finalCompletion = await this.openai.chat.completions.create({
-          model: 'gpt-4-turbo-preview',
-          messages: this.conversationHistory as any,
-          temperature: 0.8,
-        });
+          // Add function call and result to conversation history (proper format for OpenAI)
+          this.conversationHistory.push({
+            role: 'assistant',
+            content: currentMessage.content || null,
+            function_call: {
+              name: functionName,
+              arguments: currentMessage.function_call!.arguments,
+            },
+          } as any);
 
-        const finalMessage = finalCompletion.choices[0].message.content || '';
-        this.conversationHistory.push({
-          role: 'assistant',
-          content: finalMessage,
-        });
+          this.conversationHistory.push({
+            role: 'function',
+            name: functionName,
+            content: JSON.stringify(functionResult),
+          } as any);
 
-        responseCallback({
-          type: 'message',
-          content: finalMessage,
-          data: functionResult,
-        });
-      } else {
-        // No function call, just respond
-        const content = responseMessage.content || '';
-        this.conversationHistory.push({
-          role: 'assistant',
-          content,
-        });
+          console.log(`[Iteration ${iteration}] Function completed, continuing to next iteration...`);
+          console.log(`[Iteration ${iteration}] Conversation history length: ${this.conversationHistory.length}`);
 
-        responseCallback({
-          type: 'message',
-          content,
-        });
+          // Continue loop to check if AI wants to make another function call
+          continue;
+        } else {
+          // No more function calls, return final response
+          // If AI didn't provide content but we have a function result, generate a default message
+          let finalMessage = currentMessage.content || '';
+          
+          if (!finalMessage && finalFunctionResult) {
+            // Generate a helpful message based on the last function result
+            if (finalFunctionResult.success && finalFunctionResult.overlay) {
+              finalMessage = 'The ghost has been successfully summoned to the first clip. Spooky, isn\'t it?';
+            } else if (finalFunctionResult.success && finalFunctionResult.overlays) {
+              finalMessage = `Successfully added ${finalFunctionResult.count || finalFunctionResult.overlays.length} spooky overlay(s)!`;
+            } else {
+              finalMessage = 'Done!';
+            }
+          }
+          
+          // Add assistant response to history
+          this.conversationHistory.push({
+            role: 'assistant',
+            content: finalMessage,
+          });
+
+          console.log(`[Final Response] After ${iteration} iteration(s):`, finalMessage);
+          console.log(`[Final Response] Last function result:`, JSON.stringify(finalFunctionResult, null, 2));
+
+          responseCallback({
+            type: 'message',
+            content: finalMessage,
+            data: finalFunctionResult, // Include last function result in response
+          });
+          
+          return; // Exit loop and return
+        }
       }
+
+      // If we hit max iterations, still return the last result so user can continue
+      console.warn(`Reached max iterations (${maxIterations}), forcing completion`);
+      const completionMessage = finalFunctionResult 
+        ? `Completed ${maxIterations} function calls. ${finalFunctionResult.success ? 'Operation successful!' : 'Check results.'}`
+        : 'Maximum function call iterations reached.';
+      
+      responseCallback({
+        type: 'message',
+        content: completionMessage,
+        data: finalFunctionResult,
+      });
     } catch (error: any) {
       console.error('Error processing message:', error);
       responseCallback({
@@ -174,22 +293,60 @@ export class AIAgent {
    */
   private getSystemPrompt(): string {
     return `You are a ghoulish creative partner helping users make their videos more frightful. 
-You can search for spooky images (ghosts, monsters, tombstones) with transparent backgrounds, 
-download them, and add them as overlays to video clips with smart positioning.
+CRITICAL: When users ask you to add effects, overlays, or make edits, you MUST ACTUALLY DO IT by calling the functions immediately. 
+Don't just describe what you would do - EXECUTE the actions using the available functions!
 
-When adding overlays:
-- Ghosts should be placed near the TOP of the video (y: 0-30%)
-- Tombstones should be placed near the BOTTOM (y: 70-100%)
-- Monsters can be placed in the MIDDLE or varied positions (y: 30-70%)
-- X positions should be random but aesthetically pleasing (spread across 10-90%)
-- Use 3-5 overlays per clip for a good spooky effect
-- Set opacity between 0.3-0.7 for a subtle, eerie appearance
-- Each overlay should be 15-25% of the video size
+Available functions:
+- searchSpookyImages(query, type, count): Search for spooky images
+- addOverlaysToClip(clipId, overlays): Add overlays to the main video clip (clipId can be "first", "focused", or "all" - always targets track 0/main video)
+- applyFilterToClip(clipId, filter): Apply filters (grayscale, sepia, vintage, xray, blur, bright, dark, high-contrast, or "none")
+- splitClipAtTime(clipId, timestamp): Split a clip at a specific time
+- trimClip(clipId, inTime, outTime): Set in/out points to trim clips
+- applyBlackAndWhiteToTrack1(enable): Apply grayscale to all Track 1 clips
+- getTimelineState(): Get current timeline information
 
-You can also apply a black and white filter to Track 1 (overlay track) clips to make them more eerie.
+WORKFLOW - When user asks for overlays (ghosts/monsters/tombstones):
+1. FIRST call listAssets(type) to check for existing assets in the assets folder
+2. If assets exist, use useExistingAsset() with the filename to reuse them
+3. ONLY if no assets exist, THEN call searchSpookyImages (count: 1 for speed)
+4. Call addOverlaysToClip with the asset (existing or newly downloaded)
+5. If they mention filters, IMMEDIATELY call applyFilterToClip
+6. Then respond with a brief spooky confirmation
 
-Always maintain a spooky but helpful tone. Use phrases like "frightful", "ghastly", "eerie", 
-"spine-chilling", etc. But remain helpful and clear in your instructions.`;
+If user asks to "use existing assets" or mentions assets folder:
+- Call listAssets() first to see what's available
+- Use useExistingAsset() with filenames from the results
+
+IMPORTANT PERFORMANCE NOTE:
+- Only download ONE asset per command for speed (count: 1)
+- Downloaded assets are saved to the assets folder for reuse
+- ALWAYS check for existing assets FIRST using listAssets() before downloading
+- If ⌨user asks for ghosts/monsters/tombstones, FIRST check listAssets(type) for existing assets
+- Only search and download if no existing assets are found in the folder
+- Use useExistingAsset() to reuse assets from the folder instead of downloading
+
+OVERLAY POSITIONING (handled automatically):
+- Ghosts: TOP (y: 0-30%)
+- Tombstones: BOTTOM (y: 70-100%)
+- Monsters: MIDDLE (y: 30-70%)
+- X positions: spread 10-90%
+- Opacity: 0.3-0.7
+- Size: 15-25%
+
+EXAMPLES:
+User: "Add ghosts" -> 
+  1. Call listAssets("ghost") to check assets folder
+  2. If assets found: use useExistingAsset(filename, "first", "ghost") with one of the filenames
+  3. For example: useExistingAsset("ghost_girl.png", "first", "ghost")
+  4. If no assets: Call searchSpookyImages("ghost", "ghost", 1) then addOverlaysToClip("first", [{"url": result.url, "type": "ghost"}])
+  
+User: "Use existing ghost assets" -> Call listAssets("ghost") then useExistingAsset() for each
+
+User: "Add ghost from ghost_girl.png" -> Call useExistingAsset("ghost_girl.png", "first", "ghost") directly
+
+User: "Make it black and white" -> Call applyFilterToClip("all", "grayscale")
+
+Always maintain a spooky but helpful tone. Be brief in responses - don't over-explain, just confirm what you did.`;
   }
 
   /**
@@ -214,8 +371,8 @@ Always maintain a spooky but helpful tone. Use phrases like "frightful", "ghastl
             },
             count: {
               type: 'number',
-              description: 'Number of images to retrieve (default: 3)',
-              default: 3,
+              description: 'Number of images to retrieve (default: 1, max: 1 for performance)',
+              default: 1,
             },
           },
           required: ['query', 'type'],
@@ -223,13 +380,13 @@ Always maintain a spooky but helpful tone. Use phrases like "frightful", "ghastl
       },
       {
         name: 'addOverlaysToClip',
-        description: 'Add multiple overlay effects to a specific clip with smart positioning based on type',
+        description: 'Add multiple overlay effects to the main video clip (track 0) with smart positioning based on type. Overlays are always added to the main video track.',
         parameters: {
           type: 'object',
           properties: {
             clipId: {
               type: 'string',
-              description: 'ID of the clip to add overlays to (use "first" for first clip, "focused" for focused clip, or "all" for all clips)',
+              description: 'ID of the clip to add overlays to (use "first" for first main video clip, "focused" for focused clip, or "all" - always targets track 0/main video)',
             },
             overlays: {
               type: 'array',
@@ -238,12 +395,21 @@ Always maintain a spooky but helpful tone. Use phrases like "frightful", "ghastl
                 properties: {
                   imageUrl: {
                     type: 'string',
-                    description: 'URL of the image to download and use',
+                    description: 'URL of the image to download and use (can use "url" field from Pixabay search results)',
+                  },
+                  url: {
+                    type: 'string',
+                    description: 'Alternative field name for imageUrl - can use the "url" field directly from Pixabay search results',
                   },
                   type: {
                     type: 'string',
                     enum: ['ghost', 'monster', 'tombstone'],
-                    description: 'Type of overlay (affects positioning)',
+                    description: 'Type of overlay (affects positioning). If not provided, will try to infer from tags.',
+                  },
+                  tags: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Optional tags array from Pixabay to help infer type if type is not provided',
                   },
                   opacity: {
                     type: 'number',
@@ -251,7 +417,7 @@ Always maintain a spooky but helpful tone. Use phrases like "frightful", "ghastl
                     default: 0.5,
                   },
                 },
-                required: ['imageUrl', 'type'],
+                required: ['imageUrl'],
               },
             },
           },
@@ -340,6 +506,47 @@ Always maintain a spooky but helpful tone. Use phrases like "frightful", "ghastl
           properties: {},
         },
       },
+      {
+        name: 'listAssets',
+        description: 'List all available spooky assets (ghosts, monsters, tombstones) in the assets folder',
+        parameters: {
+          type: 'object',
+          properties: {
+            type: {
+              type: 'string',
+              enum: ['ghost', 'monster', 'tombstone', 'all'],
+              description: 'Filter by type (optional, default: "all")',
+            },
+          },
+        },
+      },
+      {
+        name: 'useExistingAsset',
+        description: 'Use an existing asset from the assets folder instead of downloading new ones',
+        parameters: {
+          type: 'object',
+          properties: {
+            filename: {
+              type: 'string',
+              description: 'Filename of the asset to use from the assets folder',
+            },
+            clipId: {
+              type: 'string',
+              description: 'ID of clip to add overlay to ("first", "focused", or "all")',
+            },
+            type: {
+              type: 'string',
+              enum: ['ghost', 'monster', 'tombstone'],
+              description: 'Type of overlay (affects positioning)',
+            },
+            opacity: {
+              type: 'number',
+              description: 'Opacity (0-1, default: 0.5)',
+            },
+          },
+          required: ['filename', 'clipId', 'type'],
+        },
+      },
     ];
   }
 
@@ -371,6 +578,12 @@ Always maintain a spooky but helpful tone. Use phrases like "frightful", "ghastl
       case 'getTimelineState':
         return this.getTimelineStateInfo();
 
+      case 'listAssets':
+        return await this.listAssets(args.type || 'all');
+
+      case 'useExistingAsset':
+        return await this.useExistingAsset(args.filename, args.clipId, args.type, args.opacity);
+
       default:
         throw new Error(`Unknown function: ${name}`);
     }
@@ -384,61 +597,148 @@ Always maintain a spooky but helpful tone. Use phrases like "frightful", "ghastl
     type: 'ghost' | 'monster' | 'tombstone',
     count: number
   ): Promise<any> {
-    const result = await this.imageService.searchSpookyImages(query, type);
-    const limitedImages = result.images.slice(0, count);
+    try {
+      // Limit to maximum 1 asset per command for performance
+      const maxCount = Math.min(count || 1, 1);
+      console.log(`Searching for ${maxCount} ${type} image(s)...`);
+      
+      const result = await this.imageService.searchSpookyImages(query, type);
+      const limitedImages = result.images.slice(0, maxCount);
 
-    return {
-      success: true,
-      images: limitedImages,
-      count: limitedImages.length,
-    };
+      console.log(`Found ${limitedImages.length} image(s) from Pixabay`);
+      
+      if (limitedImages.length === 0) {
+        return {
+          success: false,
+          error: 'No images found. Try a different search query or check your Pixabay API key.',
+          images: [],
+          count: 0,
+        };
+      }
+
+      return {
+        success: true,
+        images: limitedImages,
+        count: limitedImages.length,
+      };
+    } catch (error: any) {
+      console.error('Error searching for images:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to search for images. Check your internet connection and Pixabay API key.',
+        images: [],
+        count: 0,
+      };
+    }
   }
 
   /**
-   * Add overlays to a clip
+   * Add overlays to a clip (limit to 1 overlay for performance)
    */
   private async addOverlaysToClip(clipId: string, overlays: any[]): Promise<any> {
+    // Limit to 1 overlay per command for performance
+    const limitedOverlays = overlays.slice(0, 1);
     try {
-      // Resolve clip ID
+      // Resolve clip ID - always target main video track (track 0)
       let targetClip: TimelineClip | undefined;
       
       if (clipId === 'first' || clipId === 'focused') {
-        targetClip = this.timelineClips[0]; // For now, use first clip
+        // Find the first clip on track 0 (main video track)
+        targetClip = this.timelineClips.find(c => (c.track || 0) === 0);
+        if (!targetClip) {
+          // Fallback to first clip if no track 0 clip exists
+          targetClip = this.timelineClips[0];
+        }
+      } else if (clipId === 'all') {
+        // For "all", find first clip on track 0
+        targetClip = this.timelineClips.find(c => (c.track || 0) === 0);
+        if (!targetClip) {
+          targetClip = this.timelineClips[0];
+        }
       } else {
+        // Specific clip ID - ensure it's on track 0, otherwise find first track 0 clip
         targetClip = this.timelineClips.find(c => c.id === clipId);
+        if (targetClip && targetClip.track !== undefined && targetClip.track !== 0) {
+          // If requested clip is not on track 0, use first track 0 clip instead
+          console.warn(`Clip ${clipId} is not on main track (track 0), using first main track clip instead`);
+          targetClip = this.timelineClips.find(c => (c.track || 0) === 0) || this.timelineClips[0];
+        }
       }
 
       if (!targetClip) {
-        throw new Error('No clip found to add overlays to');
+        throw new Error('No main video clip (track 0) found to add overlays to');
+      }
+      
+      // Ensure we're working with track 0
+      if (targetClip.track !== undefined && targetClip.track !== 0) {
+        throw new Error('Overlays can only be added to main video track (track 0)');
       }
 
       // Download images and create overlay effects
       const downloadedOverlays = [];
 
-      for (const overlay of overlays) {
+      for (const overlay of limitedOverlays) {
         try {
+          // Get image URL from overlay (could be imageUrl or url from Pixabay)
+          const imageUrl = overlay.imageUrl || overlay.url;
+          if (!imageUrl) {
+            console.error('Overlay missing imageUrl or url:', overlay);
+            continue;
+          }
+
+          // Get type - if not provided, try to infer from tags or use a default
+          let overlayType: 'ghost' | 'monster' | 'tombstone' = overlay.type;
+          if (!overlayType) {
+            // Try to infer from tags or filename
+            const tags = overlay.tags || [];
+            const allTags = tags.join(' ').toLowerCase();
+            if (allTags.includes('ghost')) {
+              overlayType = 'ghost';
+            } else if (allTags.includes('tombstone') || allTags.includes('grave')) {
+              overlayType = 'tombstone';
+            } else if (allTags.includes('monster') || allTags.includes('zombie') || allTags.includes('creature')) {
+              overlayType = 'monster';
+            } else {
+              // Default to ghost if can't determine
+              overlayType = 'ghost';
+              console.warn('Could not determine overlay type, defaulting to ghost');
+            }
+          }
+          
           // Download the image
-          const filename = `spooky_${overlay.type}_${Date.now()}`;
-          const localPath = await this.imageService.downloadImage(overlay.imageUrl, filename);
+          const filename = `spooky_${overlayType}_${Date.now()}`;
+          console.log(`Downloading image from: ${imageUrl}`);
+          console.log(`Saving to assets folder as: ${filename}`);
+          const localPath = await this.imageService.downloadImage(imageUrl, filename, overlayType);
+          console.log(`Image downloaded successfully to: ${localPath}`);
 
           // Generate smart positioning based on type
-          const position = this.generateSmartPosition(overlay.type, downloadedOverlays.length);
+          const position = this.generateSmartPosition(overlayType, downloadedOverlays.length);
           const size = this.generateSize();
           const opacity = overlay.opacity || 0.5;
 
+          // Create overlay object matching the existing overlayEffects structure
+          // (no 'type' field - that's only used internally for positioning)
           downloadedOverlays.push({
             id: `overlay-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
             filePath: localPath,
             opacity,
             position,
             size,
-            type: overlay.type,
           });
-        } catch (error) {
+          
+          console.log(`Overlay created: ${overlayType} at position (${position.x}, ${position.y}) with opacity ${opacity}`);
+        } catch (error: any) {
           console.error('Error downloading overlay image:', error);
+          console.error('Error details:', error.message, error.stack);
         }
       }
 
+      if (downloadedOverlays.length === 0) {
+        throw new Error('Failed to download any overlays. Check image URL and network connection.');
+      }
+
+      console.log(`Successfully prepared ${downloadedOverlays.length} overlay(s) for clip ${targetClip.id}`);
       return {
         success: true,
         clipId: targetClip.id,
@@ -598,6 +898,116 @@ Always maintain a spooky but helpful tone. Use phrases like "frightful", "ghastl
       affectedClips: track1Clips.map(c => c.id),
       count: track1Clips.length,
     };
+  }
+
+  /**
+   * List available assets
+   */
+  private async listAssets(type: 'ghost' | 'monster' | 'tombstone' | 'all'): Promise<any> {
+    try {
+      // Pass type directly to listAssets (or undefined for 'all')
+      const assets = type === 'all' 
+        ? this.imageService.listAssets()
+        : this.imageService.listAssets(type);
+      console.log(`[listAssets] Found ${assets.length} asset(s) of type '${type}'`);
+      
+      return {
+        success: true,
+        assets: assets.map(asset => ({
+          filename: asset.filename,
+          path: asset.path,
+          size: asset.size,
+          modified: asset.modified.toISOString(),
+          type: asset.type, // Include type in response
+        })),
+        count: assets.length,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
+  }
+
+  /**
+   * Use an existing asset from the assets folder
+   */
+  private async useExistingAsset(
+    filename: string,
+    clipId: string,
+    type: 'ghost' | 'monster' | 'tombstone',
+    opacity?: number
+  ): Promise<any> {
+    try {
+      // Get asset by filename and type (checks both project and userData folders)
+      const assetPath = this.imageService.getAsset(filename, type);
+      if (!assetPath) {
+        throw new Error(`Asset "${filename}" not found in assets/${type}/ folder`);
+      }
+      console.log(`[useExistingAsset] Using asset from: ${assetPath}`);
+
+      // Resolve clip ID - always target main video track (track 0)
+      let targetClip: TimelineClip | undefined;
+      
+      if (clipId === 'first' || clipId === 'focused') {
+        // Find the first clip on track 0 (main video track)
+        targetClip = this.timelineClips.find(c => (c.track || 0) === 0);
+        if (!targetClip) {
+          // Fallback to first clip if no track 0 clip exists
+          targetClip = this.timelineClips[0];
+        }
+      } else if (clipId === 'all') {
+        // For "all", find first clip on track 0
+        targetClip = this.timelineClips.find(c => (c.track || 0) === 0);
+        if (!targetClip) {
+          targetClip = this.timelineClips[0];
+        }
+      } else {
+        // Specific clip ID - ensure it's on track 0, otherwise find first track 0 clip
+        targetClip = this.timelineClips.find(c => c.id === clipId);
+        if (targetClip && targetClip.track !== undefined && targetClip.track !== 0) {
+          // If requested clip is not on track 0, use first track 0 clip instead
+          console.warn(`Clip ${clipId} is not on main track (track 0), using first main track clip instead`);
+          targetClip = this.timelineClips.find(c => (c.track || 0) === 0) || this.timelineClips[0];
+        }
+      }
+
+      if (!targetClip) {
+        throw new Error('No main video clip (track 0) found to add overlay to');
+      }
+      
+      // Ensure we're working with track 0
+      if (targetClip.track !== undefined && targetClip.track !== 0) {
+        throw new Error('Overlays can only be added to main video track (track 0)');
+      }
+
+      // Generate smart positioning
+      const position = this.generateSmartPosition(type, 0);
+      const size = this.generateSize();
+      const overlayOpacity = opacity || 0.5;
+
+      // Create overlay object matching the existing overlayEffects structure
+      // (no 'type' field - that's only used internally for positioning)
+      const overlay = {
+        id: `overlay-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        filePath: assetPath,
+        opacity: overlayOpacity,
+        position,
+        size,
+      };
+
+      return {
+        success: true,
+        clipId: targetClip.id,
+        overlay,
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message,
+      };
+    }
   }
 
   /**
