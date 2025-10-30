@@ -1,6 +1,10 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, session } from 'electron';
 import * as path from 'path';
 import { setupIpcHandlers, setMainWindow } from './ipc-handlers';
+
+// Load environment variables from .env file
+import * as dotenv from 'dotenv';
+dotenv.config();
 
 let mainWindow: BrowserWindow;
 
@@ -21,6 +25,26 @@ function createWindow() {
       sandbox: false,
       webSecurity: false  // Allow file access for drag-and-drop
     }
+  });
+
+  // Handle permissions for screen recording
+  session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+    // Allow display capture and media permissions for screen recording
+    if (permission === 'display-capture' || permission === 'media') {
+      callback(true);
+    } else {
+      callback(false);
+    }
+  });
+
+  // Handle media access requests (for getUserMedia with desktop sources)
+  // Note: setPermissionCheckHandler has different valid permission types than setPermissionRequestHandler
+  session.defaultSession.setPermissionCheckHandler((webContents, permission, requestingOrigin, details) => {
+    // Only check for 'media' here as 'display-capture' is not valid for this handler
+    if (permission === 'media') {
+      return true;
+    }
+    return false;
   });
 
   mainWindow.loadFile(path.join(__dirname, 'index.html'));

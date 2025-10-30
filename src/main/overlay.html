@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    body {
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      background: transparent;
+      -webkit-app-region: drag;
+      cursor: move;
+    }
+    #container {
+      width: 100%;
+      height: 100%;
+      border: 2px solid white;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+    #webcam {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    #error {
+      display: none;
+      color: white;
+      text-align: center;
+      padding: 20px;
+      background: rgba(0, 0, 0, 0.8);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 12px;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <video id="webcam" autoplay muted playsinline></video>
+    <div id="error" style="display: none;">Unable to access webcam</div>
+  </div>
+  <script>
+    // Get device ID from URL query parameter
+    const urlParams = new URLSearchParams(window.location.search);
+    const deviceId = urlParams.get('deviceId');
+    const videoElement = document.getElementById('webcam');
+    const errorElement = document.getElementById('error');
+    
+    async function startWebcam() {
+      try {
+        // Check if getUserMedia is available
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          throw new Error('getUserMedia is not supported');
+        }
+        
+        let stream = null;
+        
+        // Try with exact device ID first
+        if (deviceId && deviceId !== 'null' && deviceId !== 'undefined') {
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({
+              video: {
+                deviceId: { exact: deviceId },
+                width: { ideal: 1280 },
+                height: { ideal: 720 }
+              },
+              audio: false
+            });
+          } catch (exactError) {
+            console.warn('Failed to use exact device ID, trying with ideal:', exactError);
+            // Try with ideal instead of exact
+            try {
+              stream = await navigator.mediaDevices.getUserMedia({
+                video: {
+                  deviceId: { ideal: deviceId },
+                  width: { ideal: 1280 },
+                  height: { ideal: 720 }
+                },
+                audio: false
+              });
+            } catch (idealError) {
+              console.warn('Failed with ideal device ID, falling back to default:', idealError);
+            }
+          }
+        }
+        
+        // If still no stream, try default camera
+        if (!stream) {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+              facingMode: 'user'
+            },
+            audio: false
+          });
+        }
+        
+        videoElement.srcObject = stream;
+        videoElement.style.display = 'block';
+        errorElement.style.display = 'none';
+      } catch (error) {
+        console.error('Error accessing webcam:', error);
+        videoElement.style.display = 'none';
+        errorElement.style.display = 'flex';
+        errorElement.textContent = 'Unable to access webcam: ' + error.message;
+      }
+    }
+    
+    startWebcam();
+  </script>
+</body>
+</html>
+

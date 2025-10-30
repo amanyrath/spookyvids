@@ -40,3 +40,6 @@ process-docs/
 *.dmg
 *.deb
 *.rpm
+
+.env
+

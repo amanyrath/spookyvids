@@ -1,0 +1,103 @@
+// Temporary file - scroll logic replacement from lines 452-489
+    
+    // Calculate target scroll position
+    let targetScrollLeft: number;
+    
+    if (isPlaying) {
+      // iMovie style: Center the playhead during playback with smooth scrolling
+      targetScrollLeft = currentPlayheadX - containerWidth / 2;
+    } else {
+      // When not playing: Keep playhead visible with padding (original behavior)
+      if (currentPlayheadX < visibleStart + padding) {
+        targetScrollLeft = Math.max(0, currentPlayheadX - padding);
+      } else if (currentPlayheadX > visibleEnd - padding) {
+        const maxScroll = Math.max(0, container.scrollWidth - containerWidth);
+        targetScrollLeft = Math.min(maxScroll, currentPlayheadX + padding - containerWidth);
+      } else {
+        // Playhead is already visible, no need to scroll
+        return;
+      }
+    }
+    
+    // Clamp target scroll position
+    const maxScroll = Math.max(0, container.scrollWidth - containerWidth);
+    targetScrollLeft = Math.max(0, Math.min(maxScroll, targetScrollLeft));
+    
+    const currentScrollLeft = scrollLeft;
+    const scrollDifference = Math.abs(targetScrollLeft - currentScrollLeft);
+    
+    // Only scroll if there's a meaningful difference
+    if (scrollDifference < 1) return;
+    
+    // Cancel any ongoing smooth scroll animation
+    if (scrollAnimationRef.current !== null) {
+      cancelAnimationFrame(scrollAnimationRef.current);
+      scrollAnimationRef.current = null;
+    }
+    
+    // Temporarily disable user scroll detection
+    const wasUserScrolling = isUserScrollingRef.current;
+    isUserScrollingRef.current = true;
+    
+    if (isPlaying && scrollDifference > 5) {
+      // Smooth scrolling animation for playback (iMovie style)
+      const startScroll = currentScrollLeft;
+      const startTime = performance.now();
+      const duration = Math.min(300, scrollDifference * 0.5); // Adaptive duration based on distance
+      
+      const animateScroll = (currentTime: number) => {
+        const elapsed = currentTime -_P startTime;
+        const progress = Math.min(elapsed / duration, 1);
+        
+        // Ease-out cubic function for smooth deceleration
+        const easeOutCubic = 1 - Math.pow(1 - progress, 3);
+        const newScroll = startScroll + (targetScrollLeft - startScroll) * easeOutCubic;
+        
+        if (container && scrollContainerRef.current === container) {
+          container.scrollLeft = newScroll;
+          
+          // Sync ruler scroll
+          if (rulerRef.current) {
+            rulerRef.current.scrollLeft = newScroll;
+          }
+          
+          if (progress < 1) {
+            scrollAnimationRef.current = requestAnimationFrame(animateScroll);
+          } else {
+            scrollAnimationRef.current = null;
+            // Re-enable after animation completes
+            setTimeout(() => {
+              isUserScrollingRef.current = wasUserScrolling;
+            }, 100);
+          }
+        }
+      };
+      
+      scrollAnimationRef.current = requestAnimationFrame(animateScroll);
+    } else {
+      // Instant scroll for small movements or when not playing
+      requestAnimationFrame(() => {
+        if (container && scrollContainerRef.current === container) {
+          container.scrollLeft = targetScrollLeft;
+          
+          if (rulerRef.current) {
+            rulerRef.current.scrollLeft = targetScrollLeft;
+          }
+          
+          setTimeout(() => {
+            isUserScrollingRef.current = wasUserScrolling;
+          }, 100);
+        }
+      });
+    }
+    
+    // Cleanup function
+    return () => {
+      if (scrollAnimationRef.current !== null) {
+        cancelAnimationFrame(scrollAnimationRef.current);
+        scrollAnimationRef.current = null;
+      }
+    };
+  }, [playheadTime, isPlaying, isDragging, totalDuration, scale]);
+
+

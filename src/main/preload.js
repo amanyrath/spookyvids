@@ -50,7 +50,40 @@ contextBridge.exposeInMainWorld('electronAPI', {
   saveProject: (data) => ipcRenderer.invoke('save-project', data),
   
   // Load project
-  loadProject: () => ipcRenderer.invoke('load-project')
+  loadProject: () => ipcRenderer.invoke('load-project'),
+  
+  // Screen recording
+  getScreenSources: () => ipcRenderer.invoke('get-screen-sources'),
+  createRecordingPreview: () => ipcRenderer.invoke('create-recording-preview'),
+  closeRecordingPreview: () => ipcRenderer.invoke('close-recording-preview'),
+  saveRecordingBlob: (arrayBuffer) => ipcRenderer.invoke('save-recording-blob', { arrayBuffer }),
+  convertRecording: (webmPath) => ipcRenderer.invoke('convert-recording', { webmPath }),
+  
+  // Webcam overlay window
+  createWebcamOverlay: (config) => ipcRenderer.invoke('create-webcam-overlay', config),
+  updateWebcamOverlayPosition: (x, y) => ipcRenderer.invoke('update-webcam-overlay-position', { x, y }),
+  closeWebcamOverlay: () => ipcRenderer.invoke('close-webcam-overlay'),
+  
+  // Transcription
+  transcribeVideo: (filePath) => ipcRenderer.invoke('transcribe-video', { filePath }),
+  
+  // Import overlay image
+  importOverlayImage: () => ipcRenderer.invoke('import-overlay-image'),
+  
+  // AI Agent
+  aiAgent: {
+    sendMessage: (message, timelineClips) => ipcRenderer.invoke('ai-agent:send-message', { message, timelineClips }),
+    getHistory: () => ipcRenderer.invoke('ai-agent:get-history'),
+    clearHistory: () => ipcRenderer.invoke('ai-agent:clear-history'),
+    getCacheStats: () => ipcRenderer.invoke('ai-agent:get-cache-stats'),
+    clearCache: () => ipcRenderer.invoke('ai-agent:clear-cache'),
+  },
+  
+  // Listen for AI agent responses
+  onAgentResponse: (callback) => {
+    ipcRenderer.on('ai-agent:response', (event, data) => callback(event, data));
+    return () => ipcRenderer.removeAllListeners('ai-agent:response');
+  }
 });
 
 
